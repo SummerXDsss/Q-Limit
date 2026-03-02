@@ -258,6 +258,58 @@ body {
     text-transform: uppercase;
 }
 
+/* Logo 和 Github 悬停弹窗容器 */
+.nav-brand-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.brand-hover-popup {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    box-shadow: var(--shadow-lg);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(10px);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1000;
+    text-align: center;
+    width: 200px;
+}
+
+.github-popup {
+    left: auto;
+    right: 0;
+}
+
+.nav-brand-container:hover .brand-hover-popup {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
+.brand-hover-popup img {
+    width: 100%;
+    height: auto;
+    border-radius: var(--radius-sm);
+    display: block;
+    margin-bottom: 8px;
+}
+
+.brand-hover-popup .popup-text {
+    font-size: 13px;
+    color: var(--text-primary);
+    line-height: 1.4;
+    font-weight: 500;
+}
+
 /* 搜索框 */
 .search-container {
     flex: 1;
