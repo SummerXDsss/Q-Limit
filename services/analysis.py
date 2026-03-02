@@ -3,7 +3,7 @@
 """
 import numpy as np
 import pandas as pd
-from services.stock_data import fetch_kline
+from services.stock_data import fetch_kline, fetch_stock_detail
 
 
 def calc_support_resistance(code, days=120, period="daily", market="US", product="ST"):
@@ -22,7 +22,32 @@ def calc_support_resistance(code, days=120, period="daily", market="US", product
         return {"support": [], "resistance": [], "current_price": 0}
 
     df = pd.DataFrame(kline)
+    
+    # 获取实时价格（包含盘前、盘后、夜盘）
     current_price = df["close"].iloc[-1]
+    detail = fetch_stock_detail(code, market=market, product=product)
+
+    if not detail.get("error"):
+        def _get_price(val):
+            if isinstance(val, dict):
+                # 长桥夜盘数据结构: {'last_done': '489.300', ...}
+                val = val.get("last_done") or val.get("price") or 0
+            try:
+                return float(val) if val else 0
+            except (ValueError, TypeError):
+                return 0
+
+        # 依次取：夜盘 -> 盘前/盘后 -> 常规盘
+        price_candidates = [
+            _get_price(detail.get("overnight_price")),
+            _get_price(detail.get("market_price")),
+            _get_price(detail.get("last_done"))
+        ]
+        
+        for p in price_candidates:
+            if p and p > 0:
+                current_price = p
+                break
 
     supports = []
     resistances = []
