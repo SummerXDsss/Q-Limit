@@ -33,7 +33,7 @@
 
 请确保系统已安装：
 - Python 3.8+
-- [MongoDB](https://www.mongodb.com/) (本地服务或云实例)
+- SQLite（Python 内置 `sqlite3`，无需额外安装数据库服务）
 
 ### 2. 获取代码与安装依赖
 
@@ -51,8 +51,8 @@ pip install -r requirements.txt
 
 ### 3. 配置数据库与启动
 
-项目使用 MongoDB 作为本地缓存（K线、API频控等），确保 Mongo 已启动。
-可以在项目中检查 `config.py` 的 MongoDB 设定，默认连接 `mongodb://localhost:27017`。
+项目使用 SQLite 作为本地缓存（K线、资讯、聊天记录等），无需单独启动数据库服务。
+可在 `config.py` 中通过 `SQLITE_DB_PATH` 指定数据库文件路径（默认 `data/stock_analysis.db`）。
 
 **启动后端服务器：**
 ```bash
@@ -71,8 +71,8 @@ python3 app.py
 
 ## 🛠 技术架构
 
-- **后端层**：Flask + Requests + PyMongo。主要负责承接前端数据、通过各种聚合行情接口查数据，拼接并转发 SSE 流式请求给第三方 AI。
-- **数据层**：利用 MongoDB 进行轻量级请求频率限制与 K线走势重计算的落盘缓存。
+- **后端层**：Flask + Requests + SQLite。主要负责承接前端数据、通过各种聚合行情接口查数据，拼接并转发 SSE 流式请求给第三方 AI。
+- **数据层**：利用 SQLite 进行轻量级本地缓存与历史分析数据持久化。
 - **前端层**：Vanilla JS + CSS 变量定制系统 + ECharts K线渲染引擎，全程单页面交互体验 (SPA)，UI 现代且自带优雅的 Dark Mode。
 
 ---

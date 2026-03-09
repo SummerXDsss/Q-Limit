@@ -92,7 +92,7 @@ def get_pe_analysis(code, market="US", product="ST"):
     """PE（市盈率）分析"""
     current_pe, _, _ = _get_pe_pb_from_detail(code, market, product)
 
-    # 回退到 stock_info（MongoDB 缓存）
+    # 回退到 stock_info（SQLite 缓存）
     if current_pe <= 0:
         info = fetch_stock_info(code)
         current_pe = info.get("pe", 0)

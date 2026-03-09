@@ -1,5 +1,4 @@
 flask==3.1.0
-pymongo==4.11.3
 akshare>=1.14.0
 pandas>=2.2.0
 numpy>=1.26.0

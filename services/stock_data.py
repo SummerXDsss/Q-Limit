@@ -1,7 +1,7 @@
 """
 股票数据获取服务
 支持长桥逆向接口搜索 + akshare K线数据
-MongoDB 离线时自动降级（只查远程API，不缓存）
+SQLite 不可用时自动降级（只查远程API，不缓存）
 """
 import requests
 import akshare as ak
@@ -28,7 +28,7 @@ LONGBRIDGE_HEADERS = {
 
 
 def _safe_get_collection(name):
-    """安全获取 MongoDB 集合，失败返回 None"""
+    """安全获取 SQLite 集合，失败返回 None"""
     try:
         from models.database import get_collection
         return get_collection(name)
@@ -49,7 +49,7 @@ def search_stock(keyword):
 def _search_from_longbridge(keyword):
     """
     长桥逆向接口搜索
-    MongoDB 不可用时仍返回结果（只是不缓存）
+    SQLite 不可用时仍返回结果（只是不缓存）
     """
     try:
         url = "https://m.lbkrs.com/api/forward/v1/search/container/main"
@@ -85,7 +85,7 @@ def _search_from_longbridge(keyword):
                 "updated_at": datetime.now(),
             }
 
-            # 尝试存入 MongoDB（失败不影响返回）
+            # 尝试存入 SQLite（失败不影响返回）
             try:
                 col = _safe_get_collection("stocks")
                 if col is not None:
@@ -95,7 +95,7 @@ def _search_from_longbridge(keyword):
                         upsert=True,
                     )
             except Exception:
-                pass  # MongoDB 不可用，跳过缓存
+                pass  # SQLite 不可用，跳过缓存
 
             results.append({
                 "code": doc["code"],
@@ -115,7 +115,7 @@ def _search_from_longbridge(keyword):
 
 
 def _search_from_cache(keyword):
-    """从本地 MongoDB 缓存搜索"""
+    """从本地 SQLite 缓存搜索"""
     try:
         col = _safe_get_collection("stocks")
         if col is None:
@@ -485,14 +485,12 @@ def _fetch_kline_from_akshare(code, period="daily", start_date=None, end_date=No
 
         if records and col is not None:
             try:
-                from pymongo import UpdateOne
-                ops = [
-                    UpdateOne(
+                for r in records:
+                    col.update_one(
                         {"code": code, "date": r["date"]},
-                        {"$set": r}, upsert=True
-                    ) for r in records
-                ]
-                col.bulk_write(ops)
+                        {"$set": r},
+                        upsert=True,
+                    )
             except Exception:
                 pass
 
@@ -686,7 +684,7 @@ def fetch_market_indices():
 
 
 # ============================================================
-# 公司简介 API（带 MongoDB 缓存）
+# 公司简介 API（带 SQLite 缓存）
 # ============================================================
 LB_COMPANY_WIKI_URL = "https://m.lbkrs.com/api/forward/stock-info/company-wiki-agg"
 
@@ -694,11 +692,11 @@ LB_COMPANY_WIKI_URL = "https://m.lbkrs.com/api/forward/stock-info/company-wiki-a
 def fetch_company_info(code, market="US", product="ST"):
     """
     获取公司简介信息
-    优先从 MongoDB 缓存读取，没有则从长桥 API 抓取并缓存
+    优先从 SQLite 缓存读取，没有则从长桥 API 抓取并缓存
     """
     counter_id = _build_counter_id(code, market, product)
 
-    # 1. 先查 MongoDB 缓存
+    # 1. 先查 SQLite 缓存
     col = _safe_get_collection("company_info")
     if col is not None:
         try:
@@ -746,7 +744,7 @@ def fetch_company_info(code, market="US", product="ST"):
             "updated_at": datetime.now().isoformat(),
         }
 
-        # 3. 缓存到 MongoDB
+        # 3. 缓存到 SQLite
         if col is not None:
             try:
                 col.update_one(

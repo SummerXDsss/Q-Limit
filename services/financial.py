@@ -171,7 +171,7 @@ def get_financial_report(code, market="US", product="ST"):
         lb_data["summary"] = summary
         return lb_data
 
-    # 2. 降级到 MongoDB
+    # 2. 降级到 SQLite
     col = get_collection("financial_reports")
     reports = list(col.find(
         {"code": code}, {"_id": 0}

@@ -77,7 +77,7 @@ def api_stock_detail(code):
 
 @app.route("/api/stock/<code>/company-info")
 def api_company_info(code):
-    """获取公司简介（MongoDB 缓存优先）"""
+    """获取公司简介（SQLite 缓存优先）"""
     market = request.args.get("market", "US")
     product = request.args.get("product", "ST")
     data = stock_data.fetch_company_info(code, market=market, product=product)

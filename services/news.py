@@ -38,23 +38,23 @@ def build_counter_id(code, market="US", product="ST"):
 
 def fetch_news(stock_code, limit=50, market="US", product="ST"):
     """
-    获取个股相关资讯 — 优先走长桥 API，失败则降级到 MongoDB
+    获取个股相关资讯 — 优先走长桥 API，失败则降级到 SQLite
     支持去重（按标题去重）
     """
     # 1. 先尝试长桥 API
     try:
         articles = fetch_from_longbridge(stock_code, market=market, product=product, limit=limit)
         if articles:
-            # 异步缓存到 MongoDB (best effort)
+            # 异步缓存到 SQLite (best effort)
             try:
                 _cache_news(articles, stock_code)
             except Exception as e:
-                print(f'[News] 缓存到MongoDB失败: {e}')
+                print(f"[News] 缓存到SQLite失败: {e}")
             return _deduplicate_news(articles)
     except Exception as e:
         print(f"[News] 长桥 API 失败: {e}")
 
-    # 2. 降级到 MongoDB 缓存
+    # 2. 降级到 SQLite 缓存
     try:
         col = get_collection("news")
         if col is not None:
@@ -188,7 +188,7 @@ def _strip_html(html_str):
 
 
 def _cache_news(articles, stock_code):
-    """缓存新闻到 MongoDB"""
+    """缓存新闻到 SQLite"""
     col = get_collection("news")
     if col is None:
         return
@@ -203,7 +203,7 @@ def _cache_news(articles, stock_code):
                 upsert=True,
             )
         except Exception as e:
-            print(f'[News] MongoDB写入失败: {e}')
+            print(f"[News] SQLite写入失败: {e}")
 
 
 def save_news(news_items):

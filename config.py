@@ -2,28 +2,15 @@
 股票分析平台 - 配置文件
 """
 import os
-import urllib.parse
 
 # ============================================================
-# MongoDB 配置
+# SQLite 配置
 # ============================================================
-MONGO_HOST = os.environ.get("MONGO_HOST", "localhost")
-MONGO_PORT = os.environ.get("MONGO_PORT", "27017")
-MONGO_USER = os.environ.get("MONGO_USER", "")
-MONGO_PASS = os.environ.get("MONGO_PASS", "")
-
-if MONGO_USER and MONGO_PASS:
-    user = urllib.parse.quote_plus(MONGO_USER)
-    password = urllib.parse.quote_plus(MONGO_PASS)
-    _default_mongo_uri = f"mongodb://{user}:{password}@{MONGO_HOST}:{MONGO_PORT}"
-elif MONGO_USER:
-    user = urllib.parse.quote_plus(MONGO_USER)
-    _default_mongo_uri = f"mongodb://{user}@{MONGO_HOST}:{MONGO_PORT}"
-else:
-    _default_mongo_uri = f"mongodb://{MONGO_HOST}:{MONGO_PORT}"
-
-MONGO_URI = os.environ.get("MONGO_URI", _default_mongo_uri)
-MONGO_DB_NAME = os.environ.get("MONGO_DB_NAME", "stock_analysis")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SQLITE_DB_PATH = os.environ.get(
+    "SQLITE_DB_PATH",
+    os.path.join(BASE_DIR, "data", "stock_analysis.db"),
+)
 
 # ============================================================
 # Flask 配置

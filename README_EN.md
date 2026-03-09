@@ -35,7 +35,7 @@ The backend of this project is built with lightweight **Python Flask**, with sim
 
 Please ensure your system has installed:
 - Python 3.8+
-- [MongoDB](https://www.mongodb.com/) (Local service or Cloud instance)
+- SQLite (Python built-in `sqlite3`, no external DB service required)
 
 ### 2. Get the Code & Install Dependencies
 
@@ -53,8 +53,8 @@ pip install -r requirements.txt
 
 ### 3. Configure Database & Start
 
-The project uses MongoDB as a local cache (K-lines, API rate limiting, etc.), so ensure MongoDB is running.
-You can check the MongoDB settings in `config.py` of the project, which defaults to `mongodb://localhost:27017`.
+The project uses SQLite as a local cache (K-lines, news, chat history, etc.), so no separate DB service is required.
+You can configure the DB file path with `SQLITE_DB_PATH` in `config.py` (default: `data/stock_analysis.db`).
 
 **Start the backend server:**
 ```bash
@@ -73,8 +73,8 @@ After the system starts, visit `http://127.0.0.1:5000` in your browser.
 
 ## 🛠 Technical Architecture
 
-- **Backend Layer**: Flask + Requests + PyMongo. Primarily responsible for receiving frontend data, querying data through various aggregated market APIs, assembling it, and forwarding SSE streaming requests to third-party AIs.
-- **Data Layer**: Uses MongoDB for lightweight request rate limiting and caching of recalculated K-line trends.
+- **Backend Layer**: Flask + Requests + SQLite. Primarily responsible for receiving frontend data, querying data through various aggregated market APIs, assembling it, and forwarding SSE streaming requests to third-party AIs.
+- **Data Layer**: Uses SQLite for lightweight local caching and persistence of historical analysis data.
 - **Frontend Layer**: Vanilla JS + CSS variable customization system + ECharts K-line rendering engine. Full Single Page Application (SPA) interactive experience, with a modern UI and elegant built-in Dark Mode.
 
 ---
