@@ -3,11 +3,71 @@
 """
 import os
 
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    # 允许在未安装 python-dotenv 时继续运行
+    load_dotenv = lambda *args, **kwargs: None  # noqa: E731
+
 # ============================================================
 # SQLite 配置
 # ============================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SQLITE_DB_PATH = os.environ.get(
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+
+
+def _env_bool(name, default=False):
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_int(name, default):
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_str(name, default=""):
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    value = str(raw).strip()
+    return value if value else default
+
+
+def _env_list(name):
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return []
+    values = []
+    for item in str(raw).replace("\n", ",").split(","):
+        value = item.strip()
+        if value:
+            values.append(value)
+    return values
+
+
+def _env_flag_or_mode(name, default=False, allowed_values=None):
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    value = str(raw).strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    if allowed_values and value in allowed_values:
+        return value
+    return default
+
+
+SQLITE_DB_PATH = _env_str(
     "SQLITE_DB_PATH",
     os.path.join(BASE_DIR, "data", "stock_analysis.db"),
 )
@@ -28,10 +88,68 @@ CACHE_STOCK_LIST_EXPIRE = 86400    # 股票列表缓存 1 天
 CACHE_NEWS_EXPIRE = 1800           # 资讯缓存 30 分钟
 
 # ============================================================
+# Tavily 全网搜索配置
+# ============================================================
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
+TAVILY_BASE_URL = os.environ.get("TAVILY_BASE_URL", "https://api.tavily.com/search")
+TAVILY_SEARCH_DEPTH = os.environ.get("TAVILY_SEARCH_DEPTH", "basic")
+TAVILY_MAX_RESULTS = _env_int("TAVILY_MAX_RESULTS", 5)
+TAVILY_TIMEOUT_SECONDS = _env_int("TAVILY_TIMEOUT_SECONDS", 20)
+TAVILY_TIME_RANGE = _env_str("TAVILY_TIME_RANGE", "")
+TAVILY_INCLUDE_ANSWER = _env_flag_or_mode("TAVILY_INCLUDE_ANSWER", True, {"basic", "advanced"})
+TAVILY_INCLUDE_RAW_CONTENT = _env_flag_or_mode("TAVILY_INCLUDE_RAW_CONTENT", False, {"markdown", "text"})
+TAVILY_INCLUDE_IMAGES = _env_bool("TAVILY_INCLUDE_IMAGES", False)
+TAVILY_INCLUDE_IMAGE_DESCRIPTIONS = _env_bool("TAVILY_INCLUDE_IMAGE_DESCRIPTIONS", False)
+TAVILY_INCLUDE_FAVICON = _env_bool("TAVILY_INCLUDE_FAVICON", False)
+TAVILY_AUTO_PARAMETERS = _env_bool("TAVILY_AUTO_PARAMETERS", False)
+TAVILY_COUNTRY = _env_str("TAVILY_COUNTRY", "")
+TAVILY_CHUNKS_PER_SOURCE = _env_int("TAVILY_CHUNKS_PER_SOURCE", 3)
+TAVILY_CACHE_EXPIRE = _env_int("TAVILY_CACHE_EXPIRE", 1800)
+TAVILY_INCLUDE_DOMAINS = _env_list("TAVILY_INCLUDE_DOMAINS")
+TAVILY_EXCLUDE_DOMAINS = _env_list("TAVILY_EXCLUDE_DOMAINS")
+ENABLE_WEB_SEARCH_CONTEXT = _env_bool("ENABLE_WEB_SEARCH_CONTEXT", True)
+
+# ============================================================
+# 钉钉机器人通知配置
+# ============================================================
+DINGTALK_ENABLED = _env_bool("DINGTALK_ENABLED", False)
+DINGTALK_WEBHOOK = os.environ.get("DINGTALK_WEBHOOK", "")
+DINGTALK_SECRET = os.environ.get("DINGTALK_SECRET", "")
+DINGTALK_AT_MOBILES = [m.strip() for m in os.environ.get("DINGTALK_AT_MOBILES", "").split(",") if m.strip()]
+DINGTALK_NOTIFY_ON_DEBATE = _env_bool("DINGTALK_NOTIFY_ON_DEBATE", False)
+
+# 应用机器人（Stream 模式）
+DINGTALK_STREAM_ENABLED = _env_bool("DINGTALK_STREAM_ENABLED", False)
+DINGTALK_CLIENT_ID = os.environ.get("DINGTALK_CLIENT_ID", os.environ.get("DINGTALK_APP_KEY", ""))
+DINGTALK_CLIENT_SECRET = os.environ.get("DINGTALK_CLIENT_SECRET", os.environ.get("DINGTALK_APP_SECRET", ""))
+DINGTALK_AGENT_ID = os.environ.get("DINGTALK_AGENT_ID", os.environ.get("AGENT_ID", ""))
+
+# ============================================================
 # AI 多角色模型配置
 # 每个角色可绑定不同的 LLM 模型
 # 支持 OpenAI 兼容格式 (/v1/chat/completions)
 # ============================================================
+AI_REQUEST_TIMEOUT_SECONDS = _env_int("AI_REQUEST_TIMEOUT_SECONDS", 120)
+AI_DEFAULT_API_KEY = _env_str("AI_DEFAULT_API_KEY", "")
+AI_DEFAULT_BASE_URL = _env_str("AI_DEFAULT_BASE_URL", "")
+AI_DEFAULT_MODEL = _env_str("AI_DEFAULT_MODEL", "")
+
+
+def _build_ai_role_default_config(role):
+    prefix = role.upper()
+    return {
+        "api_key": _env_str(f"AI_{prefix}_API_KEY", AI_DEFAULT_API_KEY),
+        "base_url": _env_str(f"AI_{prefix}_BASE_URL", AI_DEFAULT_BASE_URL),
+        "model": _env_str(f"AI_{prefix}_MODEL", AI_DEFAULT_MODEL),
+    }
+
+
+AI_ROLE_DEFAULT_CONFIGS = {
+    "bull": _build_ai_role_default_config("bull"),
+    "bear": _build_ai_role_default_config("bear"),
+    "judge": _build_ai_role_default_config("judge"),
+}
+
 AI_MODELS = {
     "bull": {
         "name": "多头分析师",
@@ -46,6 +164,7 @@ AI_MODELS = {
             "4. 如果你觉得需要补充分析某项数据（如供应链、回购计划、期权策略等），请**直接且主动**在本次回复中直接写出你的分析结果，而不是询问用户要不要听。\n"
             "总结：不废话，不问问题，直接给全量干货结论。"
         ),
+        "default_api_config": AI_ROLE_DEFAULT_CONFIGS["bull"],
     },
     "bear": {
         "name": "空头分析师",
@@ -60,6 +179,7 @@ AI_MODELS = {
             "4. 如果你觉得需要补充分析某项数据（如供应链、回购计划、期权策略等），请**直接且主动**在本次回复中直接写出你的推演结果，而不是询问用户要不要听。\n"
             "总结：不废话，不问问题，直接给全量干货结论。"
         ),
+        "default_api_config": AI_ROLE_DEFAULT_CONFIGS["bear"],
     },
     "judge": {
         "name": "裁判分析师",
@@ -74,6 +194,7 @@ AI_MODELS = {
             "4. 如果你有补充建议，请直接写出来。回复写完即止。\n"
             "总结：不抛问题，只做评判和最终决策。"
         ),
+        "default_api_config": AI_ROLE_DEFAULT_CONFIGS["judge"],
     },
 }
 
@@ -148,6 +269,21 @@ AI_TOOLS = [
                 "type": "object",
                 "properties": {
                     "stock_code": {"type": "string", "description": "股票代码"}
+                },
+                "required": ["stock_code"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_web_search",
+            "description": "全网搜索最新信息（新闻、公告、研报、行业动态）",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "stock_code": {"type": "string", "description": "股票代码"},
+                    "limit": {"type": "integer", "description": "返回条数，默认5", "default": 5},
                 },
                 "required": ["stock_code"],
             },

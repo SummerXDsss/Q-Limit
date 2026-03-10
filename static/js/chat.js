@@ -11,6 +11,7 @@ const ChatState = {
     activeRole: 'bull',
     isLoading: false,
     sessionId: Date.now().toString(36),
+    serverModelConfigs: {},
 };
 
 const ROLE_CONFIG = {
@@ -25,6 +26,7 @@ const ROLE_CONFIG = {
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
     initChat();
+    loadServerModelConfigs();
 });
 
 function initChat() {
@@ -87,6 +89,16 @@ function initChat() {
             document.getElementById(targetId).classList.add('active');
         });
     });
+}
+
+async function loadServerModelConfigs() {
+    try {
+        const response = await fetch('/api/ai/models');
+        const payload = await response.json();
+        ChatState.serverModelConfigs = payload.data || {};
+    } catch (err) {
+        ChatState.serverModelConfigs = {};
+    }
 }
 
 // ============================================================
@@ -345,6 +357,7 @@ function appendToolCall(role, toolName) {
         'get_technical_indicators': '技术指标',
         'get_stock_news': '资讯数据',
         'get_financial_report': '财报数据',
+        'get_web_search': '全网搜索',
         'get_kline_summary': 'K线走势',
     };
 
@@ -417,16 +430,30 @@ function escapeHtml(str) {
 // 设置弹窗逻辑
 // ============================================================
 function getApiConfig(role) {
+    const envDefault = (ChatState.serverModelConfigs[role] || {}).env_default || {};
     const saved = localStorage.getItem(`ai_config_${role}`);
 
     if (saved) {
         try {
-            return JSON.parse(saved);
+            const parsed = JSON.parse(saved);
+            return {
+                api_key: parsed.api_key || '',
+                base_url: parsed.base_url || envDefault.base_url || '',
+                model: parsed.model || envDefault.model || '',
+            };
         } catch (e) {
-            return { api_key: '', base_url: '', model: '' };
+            return {
+                api_key: '',
+                base_url: envDefault.base_url || '',
+                model: envDefault.model || '',
+            };
         }
     }
-    return { api_key: '', base_url: '', model: '' };
+    return {
+        api_key: '',
+        base_url: envDefault.base_url || '',
+        model: envDefault.model || '',
+    };
 }
 
 function openSettingsModal() {
@@ -449,23 +476,28 @@ function openSettingsModal() {
     let html = '';
     roles.forEach(role => {
         const cfg = getApiConfig(role.id);
+        const envDefault = (ChatState.serverModelConfigs[role.id] || {}).env_default || {};
+        const envHint = envDefault.base_url || envDefault.model || envDefault.has_api_key
+            ? '未填写时将使用后端 .env 默认配置；本地保存的值优先。'
+            : '当前未检测到后端 .env 默认配置。';
         html += `
             <div class="role-config-card" style="margin-bottom: 20px; padding: 15px; background: var(--bg-secondary); border-radius: 8px;">
                 <h4 style="margin-top: 0; color: var(--text-primary);">${role.name}</h4>
+                <div style="margin-bottom: 12px; color: var(--text-secondary); font-size: 12px;">${envHint}</div>
                 <div style="margin-bottom: 10px;">
-                    <label style="display:block; margin-bottom: 5px; color: var(--text-secondary); font-size: 13px;">API 密钥 <span style="font-size: 11px; color:#f44336">*必填</span></label>
+                    <label style="display:block; margin-bottom: 5px; color: var(--text-secondary); font-size: 13px;">API 密钥</label>
                     <div style="position: relative; display: flex; align-items: center;">
-                        <input type="password" id="key_${role.id}" value="${cfg.api_key || ''}" placeholder="sk-..." class="form-input" style="width: 100%; padding: 8px; padding-right: 32px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary);">
+                        <input type="password" id="key_${role.id}" value="${cfg.api_key || ''}" placeholder="${envDefault.has_api_key ? '已在后端 .env 配置，可留空' : 'sk-...'}" class="form-input" style="width: 100%; padding: 8px; padding-right: 32px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary);">
                         <span class="toggle-pwd-btn" data-target="key_${role.id}" style="position: absolute; right: 10px; cursor: pointer; color: var(--text-tertiary); user-select: none;" title="显示/隐藏密钥">👁️</span>
                     </div>
                 </div>
                 <div style="margin-bottom: 10px;">
                     <label style="display:block; margin-bottom: 5px; color: var(--text-secondary); font-size: 13px;">API 地址 (Base URL)</label>
-                    <input type="text" id="url_${role.id}" value="${cfg.base_url}" placeholder="https://api.openai.com/v1" class="form-input" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary);">
+                    <input type="text" id="url_${role.id}" value="${cfg.base_url}" placeholder="${envDefault.base_url || 'https://api.openai.com/v1'}" class="form-input" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary);">
                 </div>
                 <div>
                     <label style="display:block; margin-bottom: 5px; color: var(--text-secondary); font-size: 13px;">模型 (Model)</label>
-                    <input type="text" id="model_${role.id}" value="${cfg.model}" placeholder="gpt-4o" class="form-input" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary);">
+                    <input type="text" id="model_${role.id}" value="${cfg.model}" placeholder="${envDefault.model || 'gpt-4o'}" class="form-input" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary);">
                 </div>
             </div>
         `;
@@ -508,7 +540,7 @@ function saveSettings() {
     closeSettingsModal();
     // 弹窗提示
     const msg = document.createElement('div');
-    msg.textContent = '✅ AI 配置已保存到浏览器';
+    msg.textContent = '✅ AI 覆盖配置已保存到浏览器，留空项继续使用后端 .env 默认值';
     msg.style.cssText = 'position:fixed; top:20px; left:50%; transform:translateX(-50%); background:var(--bull-color); color:white; padding:10px 20px; border-radius:4px; z-index:10000; box-shadow: 0 4px 12px rgba(0,0,0,0.15);';
     document.body.appendChild(msg);
     setTimeout(() => msg.remove(), 2500);

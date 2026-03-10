@@ -21,7 +21,9 @@
 - **📊 全维度面板看板**：
   - K线绘制（日线、分钟线图表结合技术指标）
   - 面板集成：盘口报价、估值水温分析、技术形态监测、新闻热榜。
-- **⚙️ 隐私友好的纯前端配置**：各大 AI 模型的 API Key 及 Base URL 配置全部由用户浏览器 localStorage 纯本地保存，彻底规避服务端数据泄露风险。
+- **🔎 Tavily 全网搜索组件**：支持通过 Tavily 拉取站外最新资讯，作为 AI 分析补充上下文。
+- **🔔 钉钉通知组件**：支持将关键分析内容（如辩论裁判结果）推送到钉钉机器人。
+- **⚙️ AI 配置双通道**：支持在后端 `.env` 里配置 AI 模型默认值，也支持在浏览器设置面板里做本地覆盖，便于本机部署和快速切换。
 
 ---
 
@@ -47,6 +49,9 @@ source venv/bin/activate  # Windows 用户使用 venv\Scripts\activate
 
 # 安装依赖
 pip install -r requirements.txt
+
+# 初始化环境变量（Tavily/钉钉配置）
+cp .env.example .env
 ```
 
 ### 3. 配置数据库与启动
@@ -62,10 +67,45 @@ python3 app.py
 
 ### 4. 配置 AI 模型
 
-系统启动后，在浏览器访问 `http://127.0.0.1:5000`。
-1. 点击右上角 **"⚙️ 设置"** 图标，打开全局设置面板。
-2. 切换到 **“🤖 AI 模型配置”** 页签。
-3. 针对“多头”、“空头”和“裁判”分别填入您的第三方或原生模型代理信息（如：Base URL, API Key, Model名称）。支持所有接轨于 OpenAI `/v1/chat/completions` 标准格式的中转接口。
+优先推荐直接编辑 `.env`：
+- `AI_DEFAULT_API_KEY` / `AI_DEFAULT_BASE_URL` / `AI_DEFAULT_MODEL`：全局默认模型配置
+- `AI_BULL_*` / `AI_BEAR_*` / `AI_JUDGE_*`：分别覆盖多头、空头、裁判角色
+- `AI_REQUEST_TIMEOUT_SECONDS`：AI 请求超时时间
+
+系统启动后，在浏览器访问 `http://127.0.0.1:5000`，也可以继续通过右上角 **"⚙️ 设置"** 面板给单个浏览器做本地覆盖。前端填写的值优先，留空项会自动回退到 `.env` 默认值。支持所有接轨于 OpenAI `/v1/chat/completions` 标准格式的中转接口。
+
+### 5. 配置 Tavily 与钉钉（可选）
+
+编辑 `.env`：
+- `TAVILY_API_KEY`：Tavily 搜索密钥
+- `TAVILY_SEARCH_DEPTH`：`basic` / `advanced`
+- `TAVILY_TIME_RANGE`：默认时间范围，例如 `day/week/month/year`
+- `TAVILY_INCLUDE_DOMAINS` / `TAVILY_EXCLUDE_DOMAINS`：域名白名单/黑名单，逗号分隔
+- `TAVILY_INCLUDE_ANSWER` / `TAVILY_INCLUDE_RAW_CONTENT`：是否返回 Tavily 摘要和原文片段
+- `TAVILY_CACHE_EXPIRE`：SQLite 缓存秒数，避免重复消耗 Tavily 配额
+- `DINGTALK_ENABLED`：是否启用钉钉通知（`true/false`）
+- `DINGTALK_WEBHOOK`：钉钉机器人 webhook
+- `DINGTALK_SECRET`：钉钉加签密钥（如有）
+- `DINGTALK_NOTIFY_ON_DEBATE`：是否在 AI 辩论后自动发送裁判结论
+- `DINGTALK_STREAM_ENABLED`：是否启用钉钉应用机器人 Stream 接收
+- `DINGTALK_CLIENT_ID`：应用 `AppKey`
+- `DINGTALK_CLIENT_SECRET`：应用 `AppSecret`
+- `DINGTALK_AGENT_ID`：应用 `AgentId`
+
+钉钉机器人收到 `#命令` 后会按 [`Bot_Skills.txt`](Bot_Skills.txt) 规则执行，例如：
+- `#PRICE 601988`
+- `#NEWS AAPL`
+- `#ANALYZE 中信证券`
+- `#CONFIG 浙商证券` 后可继续直接发送账号、b64 密码完成多轮配置
+- `#CONFIG 查看` 查看当前配置，`#q` 或 `#CANCEL` 取消当前流程
+- 登录流程 60s 内不回复会自动超时退出
+
+`/api/search/web` 现支持更完整的 Tavily 参数，例如：
+- `topic=finance`
+- `time_range=month`
+- `days=7`
+- `include_domains=sec.gov,investor.apple.com`
+- `include_raw_content=text`
 
 ---
 

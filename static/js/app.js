@@ -150,6 +150,14 @@ function _clearAllPanels() {
     // 新闻
     const newsEl = document.getElementById('newsList');
     if (newsEl) newsEl.innerHTML = loading('📰', '加载资讯数据...');
+    const webSearchEl = document.getElementById('webSearchList');
+    if (webSearchEl) webSearchEl.innerHTML = loading('🌐', '加载全网搜索...');
+    const newsCountEl = document.getElementById('newsCount');
+    if (newsCountEl) newsCountEl.textContent = '';
+    const webSearchCountEl = document.getElementById('webSearchCount');
+    if (webSearchCountEl) webSearchCountEl.textContent = '';
+    const webSearchQueryHintEl = document.getElementById('webSearchQueryHint');
+    if (webSearchQueryHintEl) webSearchQueryHintEl.textContent = '';
 
     // 财报
     const finEl = document.getElementById('financialOverview');
@@ -425,25 +433,47 @@ async function loadNewsData(code) {
             btnRefresh.textContent = '⏳';
         }
 
-        const resp = await fetch(`/api/stock/${code}/news?limit=50&market=${market}&product=${product}`);
-        const json = await resp.json();
-        const data = json.data || [];
+        const [newsResp, webResp] = await Promise.all([
+            fetch(`/api/stock/${code}/news?limit=50&market=${market}&product=${product}`),
+            fetch(`/api/stock/${code}/web-search?limit=6&topic=finance&time_range=month&include_answer=true`),
+        ]);
+        const [newsJson, webJson] = await Promise.all([
+            newsResp.json().catch(() => ({})),
+            webResp.json().catch(() => ({})),
+        ]);
+        const data = newsJson.data || [];
+        const webData = webJson.data || {
+            query: '',
+            answer: '',
+            results: [],
+            filters: {},
+            cached: false,
+            error: webJson.error || '',
+        };
 
         if (typeof renderNewsPanel === 'function') {
             renderNewsPanel(data);
+        }
+        if (typeof renderWebSearchPanel === 'function') {
+            renderWebSearchPanel(webData);
         }
 
         // 更新资讯数量
         const countEl = document.getElementById('newsCount');
         if (countEl) countEl.textContent = `${data.length} 条`;
-
-        // 恢复刷新按钮
-        if (btnRefresh) {
-            btnRefresh.disabled = false;
-            btnRefresh.textContent = '🔄';
-        }
     } catch (err) {
         console.error('加载资讯数据失败:', err);
+        if (typeof renderWebSearchPanel === 'function') {
+            renderWebSearchPanel({
+                query: '',
+                answer: '',
+                results: [],
+                filters: {},
+                cached: false,
+                error: `加载失败: ${err.message}`,
+            });
+        }
+    } finally {
         const btnRefresh = document.getElementById('btnRefreshNews');
         if (btnRefresh) {
             btnRefresh.disabled = false;

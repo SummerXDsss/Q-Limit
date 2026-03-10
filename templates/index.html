@@ -354,15 +354,41 @@
 
                 <!-- 消息面面板 -->
                 <div class="tab-content" id="tab-news">
-                    <div class="news-header">
-                        <span class="news-count" id="newsCount"></span>
-                        <button class="btn-sm" id="btnRefreshNews" title="刷新资讯">🔄 刷新</button>
+                    <div class="tab-panel-header">
+                        <span style="font-size:12px;color:var(--text-secondary)">消息面资讯 + Tavily 全网搜索</span>
+                        <button class="btn-sm" id="btnRefreshNews" title="刷新资讯">🔄</button>
                     </div>
-                    <div class="news-list" id="newsList">
-                        <div class="empty-state">
-                            <span class="empty-icon">📰</span>
-                            <p>暂无资讯数据</p>
-                            <p class="empty-hint">接入长桥/金十接口后将自动显示</p>
+                    <div class="news-sources">
+                        <div class="news-section-card">
+                            <div class="news-subheader">
+                                <div>
+                                    <h3>站内资讯</h3>
+                                    <span class="news-count" id="newsCount"></span>
+                                </div>
+                            </div>
+                            <div class="news-list" id="newsList">
+                                <div class="empty-state">
+                                    <span class="empty-icon">📰</span>
+                                    <p>暂无资讯数据</p>
+                                    <p class="empty-hint">接入长桥/金十接口后将自动显示</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="news-section-card web-search-card">
+                            <div class="news-subheader">
+                                <div>
+                                    <h3>Tavily 全网搜索</h3>
+                                    <span class="news-count" id="webSearchCount"></span>
+                                </div>
+                                <span class="news-hint" id="webSearchQueryHint"></span>
+                            </div>
+                            <div class="web-search-list" id="webSearchList">
+                                <div class="empty-state">
+                                    <span class="empty-icon">🌐</span>
+                                    <p>暂无全网搜索结果</p>
+                                    <p class="empty-hint">启用 Tavily 后会自动补充站外信息</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

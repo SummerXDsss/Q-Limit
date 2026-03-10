@@ -3,6 +3,19 @@
  * 压力位/支撑位、估值分析、消息面、财报
  */
 
+function escapeHtmlText(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function escapeAttr(value) {
+    return escapeHtmlText(value);
+}
+
 // ============================================================
 // 压力位/支撑位面板
 // ============================================================
@@ -386,6 +399,85 @@ function renderNewsPanel(data) {
             </div>
         `;
     }).join('');
+}
+
+function renderWebSearchPanel(data) {
+    const el = document.getElementById('webSearchList');
+    const countEl = document.getElementById('webSearchCount');
+    const queryHintEl = document.getElementById('webSearchQueryHint');
+
+    if (!el) return;
+
+    const results = Array.isArray(data?.results) ? data.results : [];
+    if (countEl) countEl.textContent = data?.error ? '不可用' : `${results.length} 条`;
+
+    if (queryHintEl) {
+        const hints = [];
+        if (data?.filters?.topic) {
+            hints.push(data.filters.topic);
+        }
+        if (data?.filters?.time_range) {
+            hints.push(data.filters.time_range);
+        }
+        if (data?.cached) {
+            hints.push('缓存');
+        }
+        queryHintEl.textContent = hints.join(' · ');
+        queryHintEl.title = data?.query || '';
+    }
+
+    if (data?.error) {
+        el.innerHTML = `
+            <div class="empty-state">
+                <span class="empty-icon">🌐</span>
+                <p>全网搜索暂不可用</p>
+                <p class="empty-hint">${escapeHtmlText(data.error)}</p>
+            </div>
+        `;
+        return;
+    }
+
+    if (!results.length) {
+        el.innerHTML = `
+            <div class="empty-state">
+                <span class="empty-icon">🌐</span>
+                <p>暂无全网搜索结果</p>
+                <p class="empty-hint">当前股票未检索到高相关站外内容</p>
+            </div>
+        `;
+        return;
+    }
+
+    const answerHtml = data.answer
+        ? `
+            <div class="web-answer-card">
+                <div class="web-answer-title">
+                    <span>🧭 Tavily 摘要</span>
+                    <span class="web-answer-badge ${data.cached ? 'cached' : 'live'}">${data.cached ? '缓存' : '实时'}</span>
+                </div>
+                <div class="web-answer-content">${escapeHtmlText(data.answer)}</div>
+            </div>
+        `
+        : '';
+
+    const listHtml = results.map(item => {
+        const meta = [];
+        if (item.source) meta.push(escapeHtmlText(item.source));
+        if (item.published_date) meta.push(escapeHtmlText(item.published_date));
+        if (item.score !== undefined && item.score !== null && item.score !== '') {
+            meta.push(`score ${Number(item.score).toFixed(2)}`);
+        }
+        return `
+            <a class="web-result-card" href="${escapeAttr(item.url || '#')}" target="_blank" rel="noopener noreferrer">
+                <div class="web-result-meta">${meta.join(' · ')}</div>
+                <div class="web-result-title">${escapeHtmlText(item.title || '无标题')}</div>
+                <div class="web-result-desc">${escapeHtmlText(item.content || '')}</div>
+                <div class="web-result-url">${escapeHtmlText(item.url || '')}</div>
+            </a>
+        `;
+    }).join('');
+
+    el.innerHTML = `${answerHtml}<div class="web-result-list">${listHtml}</div>`;
 }
 
 // ============================================================

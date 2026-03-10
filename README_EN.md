@@ -23,7 +23,9 @@
 - **📊 Full-Dimensional Dashboard**:
   - K-line charts (daily and minute charts combined with technical indicators).
   - Panel integration: ticker tape quotes, valuation analysis, technical pattern monitoring, and trending news.
-- **⚙️ Privacy-Friendly Pure Frontend Configuration**: API Keys and Base URLs for major AI models are all saved locally in the user's browser `localStorage`, completely avoiding the risk of server-side data leakage.
+- **🔎 Tavily Web Search Component**: Supports external web search via Tavily to enrich AI analysis context.
+- **🔔 DingTalk Notification Component**: Supports pushing key analysis outputs (such as judge conclusions) to a DingTalk bot.
+- **⚙️ Dual AI Configuration Paths**: You can define default AI model settings in backend `.env`, and still override them per browser in the settings panel when needed.
 
 ---
 
@@ -49,6 +51,9 @@ source venv/bin/activate  # Windows users use `venv\Scripts\activate`
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Initialize env file (Tavily/DingTalk settings)
+cp .env.example .env
 ```
 
 ### 3. Configure Database & Start
@@ -64,10 +69,45 @@ python3 app.py
 
 ### 4. Configure AI Models
 
-After the system starts, visit `http://127.0.0.1:5000` in your browser.
-1. Click the **"⚙️ Settings"** icon in the top right corner to open the global settings panel.
-2. Switch to the **"🤖 AI Model Configuration"** tab.
-3. For "Bull", "Bear", and "Judge", respectively fill in your third-party or native model proxy information (e.g., Base URL, API Key, Model name). Supports all custom endpoints compatible with the standard OpenAI `/v1/chat/completions` format.
+Recommended: edit `.env` first:
+- `AI_DEFAULT_API_KEY` / `AI_DEFAULT_BASE_URL` / `AI_DEFAULT_MODEL`: global default model config
+- `AI_BULL_*` / `AI_BEAR_*` / `AI_JUDGE_*`: per-role overrides for bull, bear, and judge
+- `AI_REQUEST_TIMEOUT_SECONDS`: AI request timeout
+
+After the system starts, visit `http://127.0.0.1:5000` in your browser. You can still use the **"⚙️ Settings"** panel to override config locally for the current browser. Values entered in the frontend take precedence; blank fields fall back to `.env`. Supports any endpoint compatible with the OpenAI `/v1/chat/completions` format.
+
+### 5. Configure Tavily and DingTalk (Optional)
+
+Edit `.env`:
+- `TAVILY_API_KEY`: Tavily API key
+- `TAVILY_SEARCH_DEPTH`: `basic` / `advanced`
+- `TAVILY_TIME_RANGE`: default time window such as `day/week/month/year`
+- `TAVILY_INCLUDE_DOMAINS` / `TAVILY_EXCLUDE_DOMAINS`: comma-separated domain allow/block list
+- `TAVILY_INCLUDE_ANSWER` / `TAVILY_INCLUDE_RAW_CONTENT`: whether to return Tavily summary and source snippets
+- `TAVILY_CACHE_EXPIRE`: SQLite cache TTL in seconds to avoid burning Tavily quota repeatedly
+- `DINGTALK_ENABLED`: enable DingTalk notifications (`true/false`)
+- `DINGTALK_WEBHOOK`: DingTalk bot webhook
+- `DINGTALK_SECRET`: DingTalk signing secret (if enabled)
+- `DINGTALK_NOTIFY_ON_DEBATE`: auto-send judge result after debate
+- `DINGTALK_STREAM_ENABLED`: enable DingTalk app bot Stream receiver
+- `DINGTALK_CLIENT_ID`: app `AppKey`
+- `DINGTALK_CLIENT_SECRET`: app `AppSecret`
+- `DINGTALK_AGENT_ID`: app `AgentId`
+
+When the DingTalk bot receives `#command`, it will execute rules from [`Bot_Skills.txt`](Bot_Skills.txt), e.g.:
+- `#PRICE 601988`
+- `#NEWS AAPL`
+- `#ANALYZE BABA`
+- After `#CONFIG BrokerName`, users can continue by sending account and base64 password directly
+- `#CONFIG 查看` checks current config, and `#q` or `#CANCEL` aborts the active flow
+- The login flow auto-exits after 60 seconds of inactivity
+
+`/api/search/web` now supports richer Tavily options, for example:
+- `topic=finance`
+- `time_range=month`
+- `days=7`
+- `include_domains=sec.gov,investor.apple.com`
+- `include_raw_content=text`
 
 ---
 

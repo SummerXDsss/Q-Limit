@@ -4,7 +4,8 @@
 import json
 from flask import Flask, render_template, request, jsonify, Response, stream_with_context
 from config import FLASK_HOST, FLASK_PORT, FLASK_DEBUG, SECRET_KEY
-from services import stock_data, analysis, valuation, news, financial, ai_chat
+from services import stock_data, analysis, valuation, news, financial, ai_chat, web_search, notifier
+from services import bot_skills, dingtalk_robot
 from services.pattern_detector import analyze_patterns
 
 app = Flask(__name__)
@@ -191,6 +192,117 @@ def api_news_search():
 
 
 # ============================================================
+# 全网搜索 API（Tavily）
+# ============================================================
+
+
+def _query_bool(name):
+    raw = request.args.get(name)
+    if raw is None or str(raw).strip() == "":
+        return None
+    value = str(raw).strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    return None
+
+
+def _query_mode(name):
+    raw = request.args.get(name)
+    if raw is None or str(raw).strip() == "":
+        return None
+    value = str(raw).strip()
+    lowered = value.lower()
+    if lowered in ("1", "true", "yes", "on"):
+        return True
+    if lowered in ("0", "false", "no", "off"):
+        return False
+    return value
+
+
+def _query_list(name):
+    values = request.args.getlist(name)
+    if not values:
+        raw = request.args.get(name, "")
+        values = [raw] if raw else []
+
+    result = []
+    for item in values:
+        for part in str(item).split(","):
+            cleaned = part.strip()
+            if cleaned:
+                result.append(cleaned)
+    return result
+
+
+def _tavily_error_status(error):
+    return 400 if error in ("搜索关键词不能为空", "未配置 TAVILY_API_KEY", "stock_code 不能为空") else 502
+
+
+@app.route("/api/stock/<code>/web-search")
+def api_stock_web_search(code):
+    """股票维度的 Tavily 全网搜索"""
+    data = web_search.search_stock_web(
+        code,
+        keyword=request.args.get("q", "").strip() or None,
+        limit=request.args.get("limit", 6, type=int),
+        topic=request.args.get("topic", "finance"),
+        search_depth=request.args.get("search_depth", "").strip() or None,
+        time_range=request.args.get("time_range", "").strip() or None,
+        start_date=request.args.get("start_date", "").strip() or None,
+        end_date=request.args.get("end_date", "").strip() or None,
+        days=request.args.get("days", type=int),
+        include_answer=_query_mode("include_answer"),
+        include_raw_content=_query_mode("include_raw_content"),
+        include_images=_query_bool("include_images"),
+        include_image_descriptions=_query_bool("include_image_descriptions"),
+        include_favicon=_query_bool("include_favicon"),
+        include_domains=_query_list("include_domains"),
+        exclude_domains=_query_list("exclude_domains"),
+        country=request.args.get("country", "").strip() or None,
+        auto_parameters=_query_bool("auto_parameters"),
+        chunks_per_source=request.args.get("chunks_per_source", type=int),
+        use_cache=_query_bool("use_cache"),
+    )
+    if data.get("error"):
+        return jsonify({"error": data["error"], "data": data}), _tavily_error_status(data["error"])
+    return jsonify({"data": data})
+
+
+@app.route("/api/search/web")
+def api_web_search():
+    """全网搜索"""
+    query = request.args.get("q", "").strip()
+    topic = request.args.get("topic", "news")
+    limit = request.args.get("limit", 5, type=int)
+    data = web_search.search_web(
+        query=query,
+        max_results=limit,
+        topic=topic,
+        search_depth=request.args.get("search_depth", "").strip() or None,
+        time_range=request.args.get("time_range", "").strip() or None,
+        start_date=request.args.get("start_date", "").strip() or None,
+        end_date=request.args.get("end_date", "").strip() or None,
+        days=request.args.get("days", type=int),
+        include_answer=_query_mode("include_answer"),
+        include_raw_content=_query_mode("include_raw_content"),
+        include_images=_query_bool("include_images"),
+        include_image_descriptions=_query_bool("include_image_descriptions"),
+        include_favicon=_query_bool("include_favicon"),
+        include_domains=_query_list("include_domains"),
+        exclude_domains=_query_list("exclude_domains"),
+        country=request.args.get("country", "").strip() or None,
+        auto_parameters=_query_bool("auto_parameters"),
+        chunks_per_source=request.args.get("chunks_per_source", type=int),
+        use_cache=_query_bool("use_cache"),
+    )
+    if data.get("error"):
+        return jsonify({"error": data["error"], "data": data}), _tavily_error_status(data["error"])
+    return jsonify({"data": data})
+
+
+# ============================================================
 # 财报 API
 # ============================================================
 
@@ -293,10 +405,99 @@ def api_ai_model_update(role):
 
 
 # ============================================================
+# 钉钉通知 API
+# ============================================================
+
+@app.route("/api/notify/dingtalk", methods=["POST"])
+def api_notify_dingtalk():
+    """
+    钉钉通知
+    Body:
+    {
+      "msgtype": "text|markdown",
+      "content": "text消息内容",
+      "title": "markdown标题",
+      "text": "markdown正文",
+      "at_mobiles": ["138xxxx"],
+      "is_at_all": false
+    }
+    """
+    body = request.get_json() or {}
+    msgtype = (body.get("msgtype") or "text").lower()
+    at_mobiles = body.get("at_mobiles")
+    is_at_all = bool(body.get("is_at_all", False))
+
+    if msgtype == "markdown":
+        title = body.get("title", "Q-Limit 通知")
+        text = body.get("text", "")
+        if not text:
+            return jsonify({"error": "markdown 消息 text 不能为空"}), 400
+        result = notifier.send_markdown(
+            title=title,
+            text=text,
+            at_mobiles=at_mobiles,
+            is_at_all=is_at_all,
+        )
+    else:
+        content = body.get("content", "")
+        if not content:
+            return jsonify({"error": "text 消息 content 不能为空"}), 400
+        result = notifier.send_text(
+            content=content,
+            at_mobiles=at_mobiles,
+            is_at_all=is_at_all,
+        )
+
+    if result.get("ok"):
+        return jsonify({"message": "发送成功", "data": result})
+    return jsonify({"error": result.get("error", "发送失败"), "data": result}), 400
+
+
+# ============================================================
+# 机器人技能命令 API（本地调试）
+# ============================================================
+
+@app.route("/api/bot/command", methods=["POST"])
+def api_bot_command():
+    """
+    本地调试 #技能指令
+    Body: {"text": "#PRICE 601988", "user_id": "u1", "conversation_id": "c1"}
+    """
+    body = request.get_json() or {}
+    text = (body.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text 不能为空"}), 400
+
+    context = {
+        "user_id": body.get("user_id") or "debug-user",
+        "conversation_id": body.get("conversation_id") or "debug-conversation",
+        "sender_nick": body.get("sender_nick") or "debug",
+    }
+    result = bot_skills.handle_incoming_message(text, context)
+    return jsonify({
+        "data": {
+            "request": text,
+            "handled": result.get("handled", False),
+            "reply": result.get("reply", ""),
+            "reply_payload": result.get("reply_payload", {}),
+            "context": context,
+        }
+    })
+
+
+@app.route("/api/bot/status")
+def api_bot_status():
+    """查看钉钉 Stream 机器人状态"""
+    return jsonify({"data": dingtalk_robot.get_stream_status()})
+
+
+# ============================================================
 # 启动
 # ============================================================
 
 if __name__ == "__main__":
+    ok, msg = dingtalk_robot.start_dingtalk_stream_bot()
+    print(f"  🤖 钉钉机器人: {msg}")
     print("=" * 50)
     print("  📊 股票分析平台启动")
     print(f"  🌐 http://localhost:{FLASK_PORT}")
