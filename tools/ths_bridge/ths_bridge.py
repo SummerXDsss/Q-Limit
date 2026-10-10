@@ -18,6 +18,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bridge_token.txt")
+CAPTCHA_IMAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "captcha.png")
 
 MOCK_ACCOUNT = {
     "balance": {"资金余额": 10000.0, "可用金额": 8000.0, "可取金额": 8000.0, "股票市值": 52000.0, "总资产": 62000.0},
@@ -31,11 +32,112 @@ MOCK_ACCOUNT = {
 _client_lock = threading.Lock()
 _trader = None
 
+_OCR = None
+
+
+def _captcha_recognize(image_path):
+    """本地 OCR 识别同花顺的拷贝保护验证码（默认实现在 easytrader 里，但依赖 pytesseract+Tesseract）"""
+    global _OCR
+    try:
+        import ddddocr
+    except ImportError:
+        raise RuntimeError(
+            "缺少验证码识别库 ddddocr，请执行: .venv\\Scripts\\python.exe -m pip install ddddocr"
+        )
+    if _OCR is None:
+        _OCR = ddddocr.DdddOcr(show_ad=False)
+    with open(image_path, "rb") as f:
+        code = _OCR.classification(f.read())
+    # 只保留字母数字，去掉空格等杂质
+    return "".join(ch for ch in str(code) if ch.isalnum()).strip()
+
+
+def _setup_ocr():
+    """把本地 OCR 接进 easytrader（模块级引用都要替换掉）"""
+    import easytrader.grid_strategies as _gs
+    import easytrader.utils.captcha as _cap
+
+    _cap.captcha_recognize = _captcha_recognize
+    _gs.captcha_recognize = _captcha_recognize
+
+
+def _find_popup(trader):
+    """找同花顺弹出的『拷贝保护验证码』对话框"""
+    for w in trader.app.windows():
+        try:
+            if w.class_name() == "#32770" and w.is_visible():
+                return w
+        except Exception:
+            pass
+    return None
+
+
+def _solve_captcha(trader, attempts=5):
+    """刷新验证码 → 截图 → 本地 OCR → 真实键盘输入 → 点确定。返回是否通过。
+    注意：输入必须用 type_keys 真实键盘事件，set_text 客户端不认；提交用点「确定」按钮。"""
+    for _ in range(attempts):
+        d = _find_popup(trader)
+        if d is None:
+            return True
+        try:
+            sp = trader.app.window(handle=d.handle)
+            img = sp.window(control_id=0x965, class_name="Static")
+            img.click()  # 刷新验证码
+            trader.wait(0.6)
+            img.capture_as_image().save(CAPTCHA_IMAGE)
+            code = _captcha_recognize(CAPTCHA_IMAGE)
+            if len(code) >= 4:
+                edit = sp.window(control_id=0x964, class_name="Edit")
+                edit.set_focus()
+                edit.type_keys(code)
+                trader.wait(0.3)
+                sp.window(control_id=0x1, class_name="Button").click()  # 确定
+                trader.wait(1.0)
+            if _find_popup(trader) is None:
+                return True
+        except Exception:
+            trader.wait(0.3)
+    return False
+
 
 def _connect(exe_path):
     import easytrader
+    from easytrader import grid_strategies
 
+    class _CaptchaWMCopy(grid_strategies.WMCopy):
+        """WM 复制到剪贴板 + 自动过拷贝保护验证码"""
+
+        def _get_clipboard_data(self):
+            import pywinauto.clipboard as clipboard
+
+            solved = True
+            for _ in range(3):
+                if _find_popup(self._trader) is None:
+                    break
+                solved = _solve_captcha(self._trader)
+            if not solved:
+                raise RuntimeError(
+                    "同花顺拷贝保护验证码多次未通过（检查客户端窗口是否可见/被遮挡）"
+                )
+            last_err = None
+            for _ in range(5):
+                try:
+                    data = clipboard.GetData()
+                    if data:
+                        return data
+                except Exception as e:
+                    last_err = e
+                self._trader.wait(0.2)
+            if last_err is not None:
+                raise last_err
+            return ""
+
+    _setup_ocr()
     trader = easytrader.use("universal_client")
+    # 读取表格（持仓）默认走「另存为 xls」策略，在部分同花顺客户端版本上保存对话框
+    # 行为不一致，会落成 FileNotFoundError。改用「复制到剪贴板」策略，兼容性更好。
+    # 注意：复制会触发客户端的「拷贝保护验证码」，_CaptchaWMCopy 会用本地 OCR 自动通过。
+    trader.grid_strategy = _CaptchaWMCopy
     trader.connect(exe_path)
     return trader
 
@@ -50,7 +152,8 @@ def read_account(options):
         try:
             if _trader is None:
                 _trader = _connect(options.exe)
-            return {"balance": _trader.balance, "position": _trader.position}
+            # 剪贴板策略在空表格时会返回 None，统一兜成空列表
+            return {"balance": _trader.balance, "position": _trader.position or []}
         except Exception:
             # 客户端被关掉、重启或弹窗卡住后，下次请求重新连接
             _trader = None
