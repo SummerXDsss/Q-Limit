@@ -2,6 +2,7 @@
 股票分析平台 - Flask 主应用
 """
 import json
+import os
 from flask import Flask, render_template, request, jsonify, Response, stream_with_context
 from config import FLASK_HOST, FLASK_PORT, FLASK_DEBUG, SECRET_KEY
 from services import stock_data, analysis, valuation, news, financial, ai_chat, web_search, notifier
@@ -323,20 +324,22 @@ def api_stock_financial(code):
 def api_chat():
     """
     AI 单角色对话
-    Body: {"role": "bull", "message": "分析一下", "stock_code": "600519", "api_config": {...}}
+    Body: {"role": "bull", "message": "分析一下", "stock_code": "600519", "market": "SH", "product": "ST", "api_config": {...}}
     """
-    body = request.get_json()
+    body = request.get_json() or {}
     role = body.get("role", "bull")
     message = body.get("message", "")
     stock_code = body.get("stock_code", "")
     session_id = body.get("session_id", "")
     api_config = body.get("api_config", {})
+    market = body.get("market") or "US"
+    product = body.get("product") or "ST"
 
     if not message:
         return jsonify({"error": "消息不能为空"}), 400
 
     def generate():
-        for chunk in ai_chat.chat_with_role(role, message, stock_code, api_config, session_id):
+        for chunk in ai_chat.chat_with_role(role, message, stock_code, api_config, session_id, market, product):
             yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
@@ -351,19 +354,21 @@ def api_chat():
 def api_chat_debate():
     """
     一键辩论
-    Body: {"stock_code": "600519", "prompt": "全面分析", "api_config": {...}}
+    Body: {"stock_code": "600519", "market": "SH", "product": "ST", "prompt": "全面分析", "api_config": {...}}
     """
-    body = request.get_json()
+    body = request.get_json() or {}
     stock_code = body.get("stock_code", "")
     prompt = body.get("prompt", "")
     session_id = body.get("session_id", "")
     api_config = body.get("api_config", {})
+    market = body.get("market") or "US"
+    product = body.get("product") or "ST"
 
     if not stock_code:
         return jsonify({"error": "请先选择股票"}), 400
 
     def generate():
-        for chunk in ai_chat.debate(stock_code, api_config, session_id, prompt):
+        for chunk in ai_chat.debate(stock_code, api_config, session_id, prompt, market, product):
             yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
@@ -397,7 +402,7 @@ def api_ai_models():
 @app.route("/api/ai/models/<role>", methods=["PUT"])
 def api_ai_model_update(role):
     """更新 AI 模型配置"""
-    body = request.get_json()
+    body = request.get_json() or {}
     success = ai_chat.update_model_config(role, body)
     if success:
         return jsonify({"message": "配置更新成功"})
@@ -496,8 +501,10 @@ def api_bot_status():
 # ============================================================
 
 if __name__ == "__main__":
-    ok, msg = dingtalk_robot.start_dingtalk_stream_bot()
-    print(f"  🤖 钉钉机器人: {msg}")
+    # debug 重载器会把本段执行两次，只在真正提供服务的子进程里启动机器人
+    if not FLASK_DEBUG or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        ok, msg = dingtalk_robot.start_dingtalk_stream_bot()
+        print(f"  🤖 钉钉机器人: {msg}")
     print("=" * 50)
     print("  📊 股票分析平台启动")
     print(f"  🌐 http://localhost:{FLASK_PORT}")

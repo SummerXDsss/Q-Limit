@@ -137,10 +137,10 @@ def get_pb_analysis(code, market="US", product="ST"):
     }
 
 
-def get_valuation_summary(code):
+def get_valuation_summary(code, market="US", product="ST"):
     """综合估值概要（供 AI Tool Calling 使用）"""
-    pe = get_pe_analysis(code)
-    pb = get_pb_analysis(code)
+    pe = get_pe_analysis(code, market=market, product=product)
+    pb = get_pb_analysis(code, market=market, product=product)
 
     return {
         "pe": {

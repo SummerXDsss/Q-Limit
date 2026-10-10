@@ -713,7 +713,10 @@ def _generate_ai_analysis_markdown(snapshot, ctx=None, use_mcp=False):
 
     content = ""
     error = ""
-    for chunk in ai_chat.chat_with_role("judge", prompt, stock["code"], {}, session_id=session_id):
+    for chunk in ai_chat.chat_with_role(
+        "judge", prompt, stock["code"], {}, session_id=session_id,
+        market=stock.get("market") or "US", product=stock.get("product") or "ST",
+    ):
         if "content" in chunk:
             content = chunk["content"]
         elif "error" in chunk:

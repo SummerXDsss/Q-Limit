@@ -165,6 +165,8 @@ async function sendMessage() {
                 role: ChatState.activeRole,
                 message: message,
                 stock_code: stock.code,
+                market: stock.market || 'US',
+                product: stock.product || 'ST',
                 session_id: ChatState.sessionId,
                 api_config: apiConfig
             }),
@@ -253,6 +255,8 @@ async function startDebate() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 stock_code: stock.code,
+                market: stock.market || 'US',
+                product: stock.product || 'ST',
                 prompt: `请对股票 ${stock.code} (${stock.name || ''}) 进行全面分析`,
                 session_id: ChatState.sessionId,
                 api_config: combinedConfig  // 这里传合集的 config
