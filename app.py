@@ -4,9 +4,9 @@
 import json
 import os
 from flask import Flask, render_template, request, jsonify, Response, stream_with_context
-from config import FLASK_HOST, FLASK_PORT, FLASK_DEBUG, SECRET_KEY
+from config import FLASK_HOST, FLASK_PORT, FLASK_DEBUG, SECRET_KEY, SETTINGS_ALLOW_REMOTE
 from services import stock_data, analysis, valuation, news, financial, ai_chat, web_search, notifier
-from services import bot_skills, dingtalk_robot
+from services import bot_skills, dingtalk_robot, env_settings
 from services.pattern_detector import analyze_patterns
 
 app = Flask(__name__)
@@ -410,6 +410,33 @@ def api_ai_model_update(role):
 
 
 # ============================================================
+# .env 配置 API（设置面板）
+# ============================================================
+
+def _is_local_request():
+    return SETTINGS_ALLOW_REMOTE or request.remote_addr in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+
+
+@app.route("/api/settings/env", methods=["GET", "PUT"])
+def api_settings_env():
+    """
+    读取 / 修改 .env 配置，仅允许本机访问
+    PUT Body: {"values": {"TAVILY_API_KEY": "tvly-xxx"}, "clear": ["DINGTALK_SECRET"]}
+    """
+    if not _is_local_request():
+        return jsonify({"error": "出于安全考虑，服务端配置只能在运行服务的本机上查看和修改（可用 SETTINGS_ALLOW_REMOTE=true 放开）"}), 403
+
+    if request.method == "GET":
+        return jsonify({"data": env_settings.get_settings()})
+
+    body = request.get_json(silent=True) or {}
+    result = env_settings.update_settings(body.get("values"), body.get("clear"))
+    if not result.get("ok"):
+        return jsonify({"error": result.get("error", "保存失败")}), 400
+    return jsonify({"message": "配置已保存", "data": result})
+
+
+# ============================================================
 # 钉钉通知 API
 # ============================================================
 
@@ -500,11 +527,16 @@ def api_bot_status():
 # 启动
 # ============================================================
 
+def start_background_services():
+    """启动随进程常驻的后台服务（钉钉 Stream 机器人）；wsgi.py 也会调用"""
+    ok, msg = dingtalk_robot.start_dingtalk_stream_bot()
+    print(f"  🤖 钉钉机器人: {msg}")
+
+
 if __name__ == "__main__":
     # debug 重载器会把本段执行两次，只在真正提供服务的子进程里启动机器人
     if not FLASK_DEBUG or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-        ok, msg = dingtalk_robot.start_dingtalk_stream_bot()
-        print(f"  🤖 钉钉机器人: {msg}")
+        start_background_services()
     print("=" * 50)
     print("  📊 股票分析平台启动")
     print(f"  🌐 http://localhost:{FLASK_PORT}")

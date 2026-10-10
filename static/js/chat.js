@@ -85,7 +85,7 @@ function initChat() {
             document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.remove('active'));
             tab.classList.add('active');
-            const targetId = tab.dataset.tab === 'ai' ? 'tabAI' : 'tabDisplay';
+            const targetId = { ai: 'tabAI', env: 'tabEnv' }[tab.dataset.tab] || 'tabDisplay';
             document.getElementById(targetId).classList.add('active');
         });
     });
@@ -509,6 +509,7 @@ function openSettingsModal() {
 
     settingsBody.innerHTML = html;
     modal.style.display = 'flex';
+    loadEnvSettings();
 
     // 绑定显示/隐藏密码事件
     document.querySelectorAll('.toggle-pwd-btn').forEach(btn => {
@@ -530,7 +531,11 @@ function closeSettingsModal() {
     document.getElementById('settingsModal').style.display = 'none';
 }
 
-function saveSettings() {
+async function saveSettings() {
+    // 先保存服务端 .env 配置，失败时保留弹窗方便修改
+    const envResult = await saveEnvSettings();
+    if (!envResult.ok) return;
+
     const roles = ['bull', 'bear', 'judge'];
     roles.forEach(role => {
         const cfg = {
@@ -544,8 +549,8 @@ function saveSettings() {
     closeSettingsModal();
     // 弹窗提示
     const msg = document.createElement('div');
-    msg.textContent = '✅ AI 覆盖配置已保存到浏览器，留空项继续使用后端 .env 默认值';
+    msg.textContent = envResult.message || '✅ AI 覆盖配置已保存到浏览器，留空项继续使用后端 .env 默认值';
     msg.style.cssText = 'position:fixed; top:20px; left:50%; transform:translateX(-50%); background:var(--bull-color); color:white; padding:10px 20px; border-radius:4px; z-index:10000; box-shadow: 0 4px 12px rgba(0,0,0,0.15);';
     document.body.appendChild(msg);
-    setTimeout(() => msg.remove(), 2500);
+    setTimeout(() => msg.remove(), envResult.message ? 5000 : 2500);
 }

@@ -23,7 +23,7 @@ python3 app.py                # http://127.0.0.1:5000
     -d '{"text":"#PRICE AAPL","user_id":"u1","conversation_id":"c1"}'
   ```
 
-- `FLASK_HOST/PORT/DEBUG` 写死在 `config.py`（`0.0.0.0:5000`，debug 开启），不读环境变量。debug 重载器会让 `__main__` 块执行两次，所以钉钉 Stream 机器人只在 `WERKZEUG_RUN_MAIN=true` 的子进程里启动。
+- `FLASK_HOST` / `FLASK_PORT` / `FLASK_DEBUG` 可用环境变量覆盖，默认 `0.0.0.0:5000`、debug 开启。debug 重载器会让 `__main__` 块执行两次，所以钉钉 Stream 机器人只在 `WERKZEUG_RUN_MAIN=true` 的子进程里启动。
 - SQLite 文件默认 `data/stock_analysis.db`（已 gitignore，首次访问自动建库）；删掉它即可清空所有缓存和聊天记录。
 
 ## 架构
@@ -70,6 +70,17 @@ AI 对话同样如此：`/api/chat`、`/api/chat/debate` 的请求体带 `market
 - 配置优先级：前端 `localStorage`（`ai_config_{role}`，随请求体 `api_config` 发来）> `.env` 的 `AI_{BULL|BEAR|JUDGE}_*` > `AI_DEFAULT_*`，由 `_resolve_llm_config` 合并。`/api/chat/debate` 的 `api_config` 是按角色分键的字典，`/api/chat` 的是单个角色的配置。
 - `debate()` 依次跑 bull → bear → judge。裁判能看到前两者的观点，**靠的是共享 `session_id` 的 `chat_history` 回放**（`_build_messages` 取最近 10 条），并没有显式把内容传过去；调用方没给 `session_id` 时 `debate()` 会自己生成一个临时的。
 - `PUT /api/ai/models/<role>` 只改当前进程内存里的角色默认配置（`AI_ROLE_DEFAULT_CONFIGS`），不写回 `.env`，重启即失效。
+
+### 设置面板里的服务端配置（`services/env_settings.py`）
+
+设置弹窗的「服务端配置」Tab 通过 `GET/PUT /api/settings/env` 读写 `.env`，表单完全由 `SETTING_GROUPS` 里的字段声明驱动（`static/js/settings.js` 只负责通用渲染）。**在 `config.py` 新增环境变量时，要在 `SETTING_GROUPS` 里补一条才会出现在界面上。**
+
+- 只有声明过的键可写；密钥类字段只返回 `is_set`，从不回传明文；接口仅允许本机（loopback）访问，除非设置 `SETTINGS_ALLOW_REMOTE=true`。
+- 保存后会 `importlib.reload(config)`，再把新值按名字同步到所有已 `from config import X` 的 `services.*` 模块，所以多数配置即时生效。`SQLITE_DB_PATH`、`SECRET_KEY`、Flask 主机/端口不热更新；钉钉 Stream 机器人未运行时会按新配置启动，已运行时改凭证需要重启。
+
+### Docker / 生产运行
+
+`docker compose up -d --build`。容器通过 `wsgi.py` 用 gunicorn 启动，**必须单 worker**（钉钉 Stream 线程、配置热更新都是进程内状态），并发靠线程。镜像把 `SQLITE_DB_PATH` 和 `ENV_FILE_PATH` 都指到 `/app/data`（数据卷 `qlimit-data`），所以页面上保存的配置会持久化；`.env` 不能做成单文件挂载，因为保存时是"写临时文件再 rename"。compose 默认只把端口绑在宿主机 `127.0.0.1`，并设 `SETTINGS_ALLOW_REMOTE=true`（容器里看到的来源是网桥地址）——对外暴露端口时要把它关掉。
 
 ### 钉钉机器人
 
