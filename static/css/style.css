@@ -2438,6 +2438,78 @@ body {
     color: var(--text-muted);
 }
 
+/* 服务端 .env 配置 */
+.form-group select {
+    width: 100%;
+    padding: 8px 12px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 13px;
+    outline: none;
+    transition: var(--transition);
+}
+
+.form-group select:focus {
+    border-color: var(--accent-blue);
+}
+
+.form-group input:disabled {
+    opacity: 0.6;
+}
+
+.env-group > summary {
+    cursor: pointer;
+    margin-bottom: 0;
+    list-style-position: inside;
+}
+
+.env-group[open] > summary {
+    margin-bottom: 12px;
+}
+
+.env-key {
+    float: right;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--text-muted);
+}
+
+.env-hint {
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.env-secret-row {
+    display: flex;
+    gap: 8px;
+}
+
+.env-clear-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.env-settings-tip {
+    margin-bottom: 16px;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
+.env-settings-tip.is-error {
+    color: #ff5252;
+    border-color: #ff5252;
+}
+
 /* 按钮 */
 .btn {
     padding: 8px 20px;

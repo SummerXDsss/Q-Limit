@@ -527,6 +527,7 @@
             <div class="settings-tabs">
                 <button class="settings-tab active" data-tab="display">🎨 显示设置</button>
                 <button class="settings-tab" data-tab="ai">🤖 AI 模型配置</button>
+                <button class="settings-tab" data-tab="env">🛠 服务端配置</button>
             </div>
             <!-- Tab: 显示设置 -->
             <div class="settings-tab-content active" id="tabDisplay">
@@ -565,6 +566,10 @@
                     <!-- 三个角色的配置表单 -->
                 </div>
             </div>
+            <!-- Tab: 服务端 .env 配置 -->
+            <div class="settings-tab-content" id="tabEnv">
+                <div id="envSettingsBody"></div>
+            </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" id="btnCancelSettings">取消</button>
                 <button class="btn btn-primary" id="btnSaveSettings">保存配置</button>
@@ -577,6 +582,7 @@
     <script src="/static/js/chart.js"></script>
     <script src="/static/js/analysis.js"></script>
     <script src="/static/js/chat.js"></script>
+    <script src="/static/js/settings.js"></script>
 </body>
 
 </html>

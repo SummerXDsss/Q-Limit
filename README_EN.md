@@ -109,6 +109,25 @@ When the DingTalk bot receives `#command`, it will execute rules from [`Bot_Skil
 - `include_domains=sec.gov,investor.apple.com`
 - `include_raw_content=text`
 
+### 6. Docker Deployment (Optional)
+
+```bash
+docker compose up -d --build
+```
+
+Or skip the local build and use the image published to GHCR by GitHub Actions (amd64 / arm64):
+
+```bash
+QLIMIT_IMAGE=ghcr.io/summerxdsss/q-limit:latest docker compose up -d --no-build
+```
+
+Open `http://127.0.0.1:5000` and fill in the AI / Tavily / DingTalk settings under **"⚙️ Settings → 🛠 服务端配置"** — no hand-written `.env` needed.
+
+- The SQLite database and `.env` live in the `qlimit-data` volume (`/app/data` in the container) and survive rebuilds.
+- The port is bound to the host's `127.0.0.1` by default. Change it with `QLIMIT_PORT=5050 docker compose up -d` if 5000 is taken (e.g. by the macOS AirPlay Receiver).
+- To expose it on your LAN use `QLIMIT_BIND=0.0.0.0 SETTINGS_ALLOW_REMOTE=false docker compose up -d`. The in-page server settings are then disabled so others cannot change your keys or endpoints; edit `/app/data/.env` in the volume instead.
+- The container runs gunicorn with a single worker and multiple threads (the DingTalk Stream bot and live config reload are in-process state, so do not add workers).
+
 ---
 
 ## 🛠 Technical Architecture

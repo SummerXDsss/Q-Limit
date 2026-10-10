@@ -72,7 +72,9 @@ python3 app.py
 - `AI_BULL_*` / `AI_BEAR_*` / `AI_JUDGE_*`：分别覆盖多头、空头、裁判角色
 - `AI_REQUEST_TIMEOUT_SECONDS`：AI 请求超时时间
 
-系统启动后，在浏览器访问 `http://127.0.0.1:5000`，也可以继续通过右上角 **"⚙️ 设置"** 面板给单个浏览器做本地覆盖。前端填写的值优先，留空项会自动回退到 `.env` 默认值。支持所有接轨于 OpenAI `/v1/chat/completions` 标准格式的中转接口。
+也可以不手动编辑 `.env`：启动后打开右上角 **"⚙️ 设置 → 🛠 服务端配置"**，在页面上直接填写并保存（会写回 `.env`，多数配置即时生效；该页面默认只允许在运行服务的本机访问）。
+
+系统启动后，在浏览器访问 `http://127.0.0.1:5000`，也可以继续通过 **"🤖 AI 模型配置"** 给单个浏览器做本地覆盖。前端填写的值优先，留空项会自动回退到 `.env` 默认值。支持所有接轨于 OpenAI `/v1/chat/completions` 标准格式的中转接口。
 
 ### 5. 配置 Tavily 与钉钉（可选）
 
@@ -106,6 +108,27 @@ python3 app.py
 - `days=7`
 - `include_domains=sec.gov,investor.apple.com`
 - `include_raw_content=text`
+
+### 6. Docker 部署（可选）
+
+```bash
+docker compose up -d --build
+# 国内网络可指定 pip 镜像源
+PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ docker compose up -d --build
+```
+
+也可以不本地构建，直接使用 GitHub Actions 发布到 GHCR 的镜像（支持 amd64 / arm64）：
+
+```bash
+QLIMIT_IMAGE=ghcr.io/summerxdsss/q-limit:latest docker compose up -d --no-build
+```
+
+启动后访问 `http://127.0.0.1:5000`，在右上角 **"⚙️ 设置 → 🛠 服务端配置"** 里填写 AI / Tavily / 钉钉配置即可，无需手动准备 `.env`。
+
+- SQLite 数据库和 `.env` 都保存在数据卷 `qlimit-data`（容器内 `/app/data`）中，重建容器不会丢失。
+- 默认只监听宿主机的 `127.0.0.1`。端口冲突（例如 macOS 的 AirPlay 接收器占用 5000）时可改端口：`QLIMIT_PORT=5050 docker compose up -d`。
+- 需要让局域网访问时使用 `QLIMIT_BIND=0.0.0.0 SETTINGS_ALLOW_REMOTE=false docker compose up -d`。此时页面上的「服务端配置」会被禁用，避免他人改动你的密钥和接口地址；配置改为编辑卷内的 `/app/data/.env`。
+- 容器内用 gunicorn 单 worker 多线程运行（钉钉 Stream 机器人和配置热更新都是进程内状态，不能开多个 worker）。
 
 ---
 

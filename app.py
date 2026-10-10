@@ -2,10 +2,11 @@
 股票分析平台 - Flask 主应用
 """
 import json
+import os
 from flask import Flask, render_template, request, jsonify, Response, stream_with_context
-from config import FLASK_HOST, FLASK_PORT, FLASK_DEBUG, SECRET_KEY
+from config import FLASK_HOST, FLASK_PORT, FLASK_DEBUG, SECRET_KEY, SETTINGS_ALLOW_REMOTE
 from services import stock_data, analysis, valuation, news, financial, ai_chat, web_search, notifier
-from services import bot_skills, dingtalk_robot
+from services import bot_skills, dingtalk_robot, env_settings
 from services.pattern_detector import analyze_patterns
 
 app = Flask(__name__)
@@ -323,20 +324,22 @@ def api_stock_financial(code):
 def api_chat():
     """
     AI 单角色对话
-    Body: {"role": "bull", "message": "分析一下", "stock_code": "600519", "api_config": {...}}
+    Body: {"role": "bull", "message": "分析一下", "stock_code": "600519", "market": "SH", "product": "ST", "api_config": {...}}
     """
-    body = request.get_json()
+    body = request.get_json() or {}
     role = body.get("role", "bull")
     message = body.get("message", "")
     stock_code = body.get("stock_code", "")
     session_id = body.get("session_id", "")
     api_config = body.get("api_config", {})
+    market = body.get("market") or "US"
+    product = body.get("product") or "ST"
 
     if not message:
         return jsonify({"error": "消息不能为空"}), 400
 
     def generate():
-        for chunk in ai_chat.chat_with_role(role, message, stock_code, api_config, session_id):
+        for chunk in ai_chat.chat_with_role(role, message, stock_code, api_config, session_id, market, product):
             yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
@@ -351,19 +354,21 @@ def api_chat():
 def api_chat_debate():
     """
     一键辩论
-    Body: {"stock_code": "600519", "prompt": "全面分析", "api_config": {...}}
+    Body: {"stock_code": "600519", "market": "SH", "product": "ST", "prompt": "全面分析", "api_config": {...}}
     """
-    body = request.get_json()
+    body = request.get_json() or {}
     stock_code = body.get("stock_code", "")
     prompt = body.get("prompt", "")
     session_id = body.get("session_id", "")
     api_config = body.get("api_config", {})
+    market = body.get("market") or "US"
+    product = body.get("product") or "ST"
 
     if not stock_code:
         return jsonify({"error": "请先选择股票"}), 400
 
     def generate():
-        for chunk in ai_chat.debate(stock_code, api_config, session_id, prompt):
+        for chunk in ai_chat.debate(stock_code, api_config, session_id, prompt, market, product):
             yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
@@ -397,11 +402,38 @@ def api_ai_models():
 @app.route("/api/ai/models/<role>", methods=["PUT"])
 def api_ai_model_update(role):
     """更新 AI 模型配置"""
-    body = request.get_json()
+    body = request.get_json() or {}
     success = ai_chat.update_model_config(role, body)
     if success:
         return jsonify({"message": "配置更新成功"})
     return jsonify({"error": f"未知角色: {role}"}), 400
+
+
+# ============================================================
+# .env 配置 API（设置面板）
+# ============================================================
+
+def _is_local_request():
+    return SETTINGS_ALLOW_REMOTE or request.remote_addr in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+
+
+@app.route("/api/settings/env", methods=["GET", "PUT"])
+def api_settings_env():
+    """
+    读取 / 修改 .env 配置，仅允许本机访问
+    PUT Body: {"values": {"TAVILY_API_KEY": "tvly-xxx"}, "clear": ["DINGTALK_SECRET"]}
+    """
+    if not _is_local_request():
+        return jsonify({"error": "出于安全考虑，服务端配置只能在运行服务的本机上查看和修改（可用 SETTINGS_ALLOW_REMOTE=true 放开）"}), 403
+
+    if request.method == "GET":
+        return jsonify({"data": env_settings.get_settings()})
+
+    body = request.get_json(silent=True) or {}
+    result = env_settings.update_settings(body.get("values"), body.get("clear"))
+    if not result.get("ok"):
+        return jsonify({"error": result.get("error", "保存失败")}), 400
+    return jsonify({"message": "配置已保存", "data": result})
 
 
 # ============================================================
@@ -495,9 +527,16 @@ def api_bot_status():
 # 启动
 # ============================================================
 
-if __name__ == "__main__":
+def start_background_services():
+    """启动随进程常驻的后台服务（钉钉 Stream 机器人）；wsgi.py 也会调用"""
     ok, msg = dingtalk_robot.start_dingtalk_stream_bot()
     print(f"  🤖 钉钉机器人: {msg}")
+
+
+if __name__ == "__main__":
+    # debug 重载器会把本段执行两次，只在真正提供服务的子进程里启动机器人
+    if not FLASK_DEBUG or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        start_background_services()
     print("=" * 50)
     print("  📊 股票分析平台启动")
     print(f"  🌐 http://localhost:{FLASK_PORT}")

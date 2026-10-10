@@ -1,0 +1,124 @@
+name: Docker 构建、冒烟测试与发布
+
+on:
+  push:
+    # 同时写 branches 和 tags：只写 tags 的话分支推送不会触发
+    branches:
+      - "**"
+    paths:
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - ".dockerignore"
+      - "requirements.txt"
+      - "**.py"
+      - "static/**"
+      - "templates/**"
+      - ".github/workflows/docker.yml"
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建镜像
+        run: docker compose build
+
+      - name: 启动容器
+        run: docker compose up -d
+
+      - name: 等待服务就绪
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:5000/api/bot/status; then exit 0; fi
+            sleep 2
+          done
+          echo "服务未在 60s 内就绪" && exit 1
+
+      - name: 冒烟测试
+        run: |
+          set -euo pipefail
+          base=http://127.0.0.1:5000
+
+          echo "== 页面与静态资源"
+          curl -fsS -o /dev/null "$base/"
+          curl -fsS -o /dev/null "$base/static/js/settings.js"
+
+          echo "== 非 root 运行"
+          test "$(docker compose exec -T q-limit id -u)" != "0"
+
+          echo "== 通过接口保存配置并写入数据卷"
+          curl -fsS -X PUT "$base/api/settings/env" -H 'Content-Type: application/json' \
+            -d '{"values":{"AI_DEFAULT_MODEL":"ci-model","TAVILY_API_KEY":"tvly-ci"}}'
+          docker compose exec -T q-limit grep -q '^AI_DEFAULT_MODEL=ci-model$' /app/data/.env
+          curl -fsS "$base/api/ai/models" | grep -q '"model": *"ci-model"'
+
+          echo "== 密钥不回显"
+          ! curl -fsS "$base/api/settings/env" | grep -q 'tvly-ci'
+
+          echo "== 机器人命令（不依赖外部网络）"
+          curl -fsS -X POST "$base/api/bot/command" -H 'Content-Type: application/json' \
+            -d '{"text":"#HELP"}' | grep -q '"handled": *true'
+
+          echo "== 重建容器后配置仍在"
+          docker compose up -d --force-recreate
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null "$base/api/bot/status"; then break; fi
+            sleep 2
+          done
+          curl -fsS "$base/api/ai/models" | grep -q '"model": *"ci-model"'
+
+          echo "== 健康检查"
+          for i in $(seq 1 30); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' q-limit)
+            if [ "$status" = "healthy" ]; then break; fi
+            sleep 2
+          done
+          test "$status" = "healthy"
+
+      - name: 输出容器日志
+        if: always()
+        run: docker compose logs --no-color | tail -n 200
+
+      # 冒烟测试通过后才发布到 GHCR：
+      #   默认分支 -> latest；其他分支 -> 分支名；v1.2.3 标签 -> 1.2.3 / 1.2；另附 sha-xxxxxxx
+      - name: 登录 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 生成镜像标签
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: 构建多架构镜像并推送
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -13,7 +13,9 @@ except ImportError:
 # SQLite 配置
 # ============================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(BASE_DIR, ".env"))
+# .env 位置可用 ENV_FILE_PATH 覆盖（Docker 下放进数据卷，便于设置面板写入并持久化）
+ENV_FILE_PATH = os.environ.get("ENV_FILE_PATH") or os.path.join(BASE_DIR, ".env")
+load_dotenv(ENV_FILE_PATH)
 
 
 def _env_bool(name, default=False):
@@ -75,9 +77,11 @@ SQLITE_DB_PATH = _env_str(
 # ============================================================
 # Flask 配置
 # ============================================================
-FLASK_HOST = "0.0.0.0"
-FLASK_PORT = 5000
-FLASK_DEBUG = True
+FLASK_HOST = _env_str("FLASK_HOST", "0.0.0.0")
+FLASK_PORT = _env_int("FLASK_PORT", 5000)
+FLASK_DEBUG = _env_bool("FLASK_DEBUG", True)
+# 设置面板的服务端配置默认只允许本机访问；容器内看不到真实来源地址，需显式放开
+SETTINGS_ALLOW_REMOTE = _env_bool("SETTINGS_ALLOW_REMOTE", False)
 SECRET_KEY = os.environ.get("SECRET_KEY", "stock-analysis-secret-key-2024")
 
 # ============================================================

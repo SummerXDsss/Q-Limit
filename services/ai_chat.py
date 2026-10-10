@@ -3,6 +3,7 @@ AI 多角色辩论聊天服务
 支持 Tool Calling，优先使用前端传入配置，缺省时回退到 .env
 """
 import json
+import uuid
 import requests
 from datetime import datetime
 from config import (
@@ -34,7 +35,7 @@ TOOL_FUNCTIONS = {
 }
 
 
-def chat_with_role(role, message, stock_code, api_config, session_id=None):
+def chat_with_role(role, message, stock_code, api_config, session_id=None, market="US", product="ST"):
     """
     与指定角色对话（纯聊天模式，适配 Web2API 中转）
     api_config: {"api_key": "xxx", "base_url": "http://...", "model": "gemini-3.0-flash"}
@@ -53,7 +54,7 @@ def chat_with_role(role, message, stock_code, api_config, session_id=None):
         yield {"error": "请先在 .env 或设置面板中配置 API Key、API 地址和模型。"}
         return
 
-    messages = _build_messages(role, message, stock_code, session_id)
+    messages = _build_messages(role, message, stock_code, session_id, market, product)
 
     # 纯Web2API聊天模式，不传递 tools，防止解析错误
     response_data = _call_llm(llm_config, messages, tools=None)
@@ -73,8 +74,10 @@ def chat_with_role(role, message, stock_code, api_config, session_id=None):
         yield {"error": "AI 未返回有效内容"}
 
 
-def debate(stock_code, api_config, session_id=None, user_prompt=None):
+def debate(stock_code, api_config, session_id=None, user_prompt=None, market="US", product="ST"):
     """一键辩论：多头→空头→裁判"""
+    # 裁判靠 session 内的聊天历史读取多空观点，未传 session_id 时生成一个临时会话
+    session_id = session_id or f"debate-{uuid.uuid4().hex}"
     prompt = user_prompt or f"请对股票 {stock_code} 进行全面分析"
     all_role_configs = api_config if isinstance(api_config, dict) else {}
 
@@ -89,7 +92,7 @@ def debate(stock_code, api_config, session_id=None, user_prompt=None):
         role_config = all_role_configs.get(role, {})
 
         full_content = ""
-        for chunk in chat_with_role(role, role_prompt, stock_code, role_config, session_id):
+        for chunk in chat_with_role(role, role_prompt, stock_code, role_config, session_id, market, product):
             if "content" in chunk:
                 full_content = chunk["content"]
             elif "tool_call" in chunk:
@@ -134,6 +137,19 @@ def get_model_configs():
     return configs
 
 
+def update_model_config(role, config):
+    """更新角色的默认模型配置（仅当前进程内生效，重启后回到 .env）"""
+    env_default = AI_ROLE_DEFAULT_CONFIGS.get(role)
+    if env_default is None:
+        return False
+    if not isinstance(config, dict):
+        return True
+    for key in ("api_key", "base_url", "model"):
+        if key in config:
+            env_default[key] = str(config.get(key) or "").strip()
+    return True
+
+
 def _resolve_llm_config(role, api_config):
     env_default = AI_ROLE_DEFAULT_CONFIGS.get(role, {})
     req = api_config if isinstance(api_config, dict) else {}
@@ -149,7 +165,7 @@ def _resolve_llm_config(role, api_config):
 # 内部函数
 # ============================================================
 
-def _build_background_context(stock_code):
+def _build_background_context(stock_code, market="US", product="ST"):
     """为纯聊天模型自动在后台抓取当前股票的各项数据指标，拼凑为纯文本上下文"""
     try:
         from services.analysis import get_technical_summary
@@ -157,10 +173,10 @@ def _build_background_context(stock_code):
         from services.news import get_news_for_ai
         from services.web_search import get_web_search_for_ai
         
-        kline = _get_kline_summary(stock_code, 30)
-        tech = get_technical_summary(stock_code)
-        val = get_valuation_summary(stock_code)
-        news = get_news_for_ai(stock_code, limit=3)
+        kline = _get_kline_summary(stock_code, 30, market=market, product=product)
+        tech = get_technical_summary(stock_code, market=market, product=product)
+        val = get_valuation_summary(stock_code, market=market, product=product)
+        news = get_news_for_ai(stock_code, limit=3, market=market, product=product)
         web_ctx = get_web_search_for_ai(stock_code, limit=3) if ENABLE_WEB_SEARCH_CONTEXT else None
         
         ctx = "【系统自动为您检索到的这只股票当前最新数据参考】\n"
@@ -188,7 +204,7 @@ def _build_background_context(stock_code):
         print(f"[AI Chat Context Error] {e}")
         return "【系统提示：当前这只股票后台数据获取失败，可以直接依常识或默认回复】"
 
-def _build_messages(role, user_message, stock_code, session_id):
+def _build_messages(role, user_message, stock_code, session_id, market="US", product="ST"):
     role_meta = AI_MODELS[role]
     messages = [
         {"role": "system", "content": role_meta["system_prompt"]},
@@ -201,7 +217,7 @@ def _build_messages(role, user_message, stock_code, session_id):
 
     user_msg = user_message
     if stock_code:
-        bg_info = _build_background_context(stock_code)
+        bg_info = _build_background_context(stock_code, market, product)
         user_msg = f"[当前分析股票代码: {stock_code}]\n\n{bg_info}\n\n[用户的提问]:\n{user_message}"
         
     messages.append({"role": "user", "content": user_msg})
@@ -252,9 +268,9 @@ def _save_chat(stock_code, session_id, role, user_message, ai_response):
     })
 
 
-def _get_kline_summary(stock_code, days=30):
+def _get_kline_summary(stock_code, days=30, market="US", product="ST"):
     from services.stock_data import fetch_kline
-    kline = fetch_kline(stock_code)
+    kline = fetch_kline(stock_code, market=market, product=product)
     if not kline:
         return {"summary": "无K线数据"}
 

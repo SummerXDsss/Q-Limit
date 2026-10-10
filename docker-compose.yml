@@ -1,0 +1,24 @@
+services:
+  q-limit:
+    build:
+      context: .
+      args:
+        # 国内构建可改为 https://mirrors.aliyun.com/pypi/simple/
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    # 想直接用已发布的镜像而不本地构建：QLIMIT_IMAGE=ghcr.io/summerxdsss/q-limit:latest docker compose up -d --no-build
+    image: ${QLIMIT_IMAGE:-q-limit:latest}
+    container_name: q-limit
+    restart: unless-stopped
+    ports:
+      # 默认只监听宿主机本地回环。要让局域网访问，把 QLIMIT_BIND 设为 0.0.0.0，
+      # 并同时把下面的 SETTINGS_ALLOW_REMOTE 改成 false（否则任何人都能在页面上改服务端配置）
+      - "${QLIMIT_BIND:-127.0.0.1}:${QLIMIT_PORT:-5000}:5000"
+    environment:
+      # 容器内看不到真实来源地址，放开后设置面板的「服务端配置」才可用
+      SETTINGS_ALLOW_REMOTE: ${SETTINGS_ALLOW_REMOTE:-true}
+    volumes:
+      # SQLite 数据库和 .env 都在这个卷里；配置通过页面「设置 → 服务端配置」填写即可
+      - qlimit-data:/app/data
+
+volumes:
+  qlimit-data:
