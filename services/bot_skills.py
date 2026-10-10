@@ -2,13 +2,12 @@
 钉钉机器人技能路由
 根据 Bot_Skills.txt 解析并执行 #xxx 指令，并支持多轮会话。
 """
-import base64
 import os
 from datetime import datetime, timedelta
 
 from config import BASE_DIR
 from models.database import get_collection
-from services import ai_chat, analysis, financial, news, stock_data, valuation, web_search
+from services import ai_chat, analysis, brokers, financial, news, stock_data, valuation, web_search
 
 SESSION_COLLECTION = "bot_sessions"
 BROKER_COLLECTION = "broker_accounts"
@@ -55,7 +54,7 @@ def _group_help_lines(lines):
         upper = line.upper()
         if upper.startswith(("#PRICE", "#KDJ", "#NEWS", "#MA10", "#ANALYZE", "#T1", "#T7", "#T30", "#T365")):
             groups["行情分析"].append(line)
-        elif upper.startswith(("#BUY", "#SELL", "#CONFIG", "#CANCEL", "#Q")):
+        elif upper.startswith(("#BUY", "#SELL", "#CONFIG", "#ACCOUNT", "#CANCEL", "#Q")):
             groups["交易配置"].append(line)
         elif upper.startswith(("#ANALYZE_MCP", "#GRAPH", "#SEARCH")):
             groups["扩展能力"].append(line)
@@ -106,7 +105,8 @@ def _help_text():
         "- #PRICE 中信证券.HK（同名多地上市默认取 A 股，可加 .HK/.SH/.SZ/.US 指定）",
         "- #ANALYZE 601998",
         "- #GRAPH on",
-        "- #CONFIG 浙商证券",
+        "- #CONFIG 长桥（私聊机器人，按提示逐项回复开发者凭证）",
+        "- #ACCOUNT",
         "- #CONFIG 查看",
         "",
         "流程提示：",
@@ -239,7 +239,8 @@ def _save_session(ctx, session):
 def _clear_session(ctx):
     get_collection(SESSION_COLLECTION).update_one(
         {"session_key": _session_key(ctx)},
-        {"$set": {"active": False, "updated_at": _now_iso()}},
+        # 一并抹掉流程中暂存的凭证
+        {"$set": {"active": False, "values": {}, "updated_at": _now_iso()}},
         upsert=True,
     )
 
@@ -294,16 +295,19 @@ def _graph_enabled(ctx):
     return bool(_get_user_preferences(ctx).get("graph_enabled", False))
 
 
-def _save_broker_profile(ctx, broker_name, account, password_b64):
-    masked_account = account if len(account) <= 4 else f"{account[:2]}***{account[-2:]}"
+def _save_broker_profile(ctx, broker_id, credentials):
+    broker = brokers.BROKERS[broker_id]
+    first_key = broker["fields"][0]["key"]
     doc = {
         "user_id": ctx["user_id"],
         "sender_nick": ctx.get("sender_nick", ""),
-        "broker_name": broker_name,
-        "account": account,
-        "account_masked": masked_account,
-        "password_b64": password_b64,
-        "password_len": len(password_b64),
+        "broker_id": broker_id,
+        "broker_name": broker["name"],
+        "account_masked": brokers.mask(credentials.get(first_key, "")),
+        "credentials": dict(credentials),
+        # 清掉旧版流程留下的账号和 b64 密码
+        "account": "",
+        "password_b64": "",
         "active": True,
         "updated_at": _now_iso(),
         "configured_at": _now_iso(),
@@ -314,6 +318,24 @@ def _save_broker_profile(ctx, broker_name, account, password_b64):
         upsert=True,
     )
     return doc
+
+
+def _remove_broker_profile(ctx):
+    get_collection(BROKER_COLLECTION).update_one(
+        {"user_id": ctx["user_id"]},
+        {"$set": {"active": False, "credentials": {}, "updated_at": _now_iso()}},
+        upsert=True,
+    )
+
+
+def _usable_broker_profile(ctx):
+    """返回 (profile, error)；旧版只存了账号密码的配置视为不可用"""
+    profile = _get_broker_profile(ctx)
+    if not profile:
+        return None, f"未完成券商配置，请先发送 #CONFIG 券商名称（支持：{'、'.join(brokers.supported_names())}）。"
+    if profile.get("broker_id") not in brokers.BROKERS or not profile.get("credentials"):
+        return None, "已保存的是旧版券商配置，无法登录，请重新发送 #CONFIG 券商名称。"
+    return profile, ""
 
 
 def _resolve_stock(keyword):
@@ -835,17 +857,37 @@ def _cmd_buy_sell(cmd, args, ctx):
     if len(args) < 3:
         return f"用法: #{cmd} 股票代码 数量 价格"
 
-    profile = _get_broker_profile(ctx)
-    if not profile:
-        return _text_response("未完成券商配置，请先发送 #CONFIG 券商名称，例如：#CONFIG 浙商证券")
+    profile, error = _usable_broker_profile(ctx)
+    if error:
+        return _text_response(error)
 
     symbol, qty, price = args[0], args[1], args[2]
     action = "买入" if cmd == "BUY" else "卖出"
     return _text_response(
         f"已收到交易指令：{action} {symbol} {qty} 股 @ {price}\n"
         f"当前券商: {profile.get('broker_name', '--')} / 账户: {profile.get('account_masked', '--')}\n"
-        "当前版本仅完成配置与指令解析，尚未接入真实交易服务商。"
+        "当前版本只接入了登录与资产查询，不会真实下单。"
     )
+
+
+def _cmd_account(ctx):
+    profile, error = _usable_broker_profile(ctx)
+    if error:
+        return _text_response(error)
+    if _is_group_chat(ctx):
+        return _text_response("资产信息只在私聊中返回，请单独给机器人发 #ACCOUNT。")
+
+    account, error = brokers.get_account(profile["broker_id"], profile["credentials"])
+    if error:
+        return _text_response(f"{profile.get('broker_name', '')} 登录失败：{error}")
+    return _markdown_response(
+        f"{profile.get('broker_name', '')} 账户",
+        f"# {profile.get('broker_name', '')} 账户\n\n{brokers.format_account(account)}",
+    )
+
+
+def _is_group_chat(ctx):
+    return ctx.get("conversation_type") == "2"
 
 
 def _cmd_config_view(ctx):
@@ -858,49 +900,67 @@ def _cmd_config_view(ctx):
         lines.append(f"- 券商: {profile.get('broker_name', '--')}")
         lines.append(f"- 账号: {profile.get('account_masked', '--')}")
         lines.append(f"- 更新时间: {profile.get('updated_at', '--')}")
+        if profile.get("broker_id") not in brokers.BROKERS or not profile.get("credentials"):
+            lines.append("- 状态: 旧版配置，无法登录，请重新发送 #CONFIG 券商名称")
+        else:
+            lines.append("发送 #ACCOUNT 查看资产与持仓，#CONFIG 删除 可清除配置。")
     else:
         lines.append("当前没有已保存的券商配置。")
+        lines.append(f"支持的券商：{'、'.join(brokers.supported_names())}")
 
     if session:
         lines.append("")
         lines.append("当前存在进行中的配置流程：")
-        lines.append(f"- 阶段: {session.get('state', '--')}")
-        if session.get("broker_name"):
-            lines.append(f"- 券商: {session.get('broker_name')}")
+        if session.get("broker_id") in brokers.BROKERS:
+            lines.append(f"- 券商: {brokers.BROKERS[session['broker_id']]['name']}")
         lines.append(f"- 剩余时间: {_remaining_seconds(session)}s")
         lines.append("可发送 #q 或 #CANCEL 取消当前流程。")
 
     return _text_response("\n".join(lines))
 
 
+def _broker_list_text():
+    lines = ["支持登录的券商："]
+    for broker in brokers.BROKERS.values():
+        lines.append(f"- {broker['name']}：{broker['guide']}")
+    return "\n".join(lines)
+
+
+def _field_prompt(broker, index):
+    field = broker["fields"][index]
+    hint = f"（{field['hint']}）" if field["hint"] else ""
+    return (
+        f"[{index + 1}/{len(broker['fields'])}] 请在 {LOGIN_FLOW_TIMEOUT_SECONDS}s 内直接回复 {field['label']}{hint}。\n"
+        "发送 #q 可退出流程。"
+    )
+
+
 def _start_config_flow(ctx, broker_name):
+    if _is_group_chat(ctx):
+        return _text_response("券商凭证不能在群里发送，请私聊机器人后再发 #CONFIG。")
+
     broker_name = (broker_name or "").strip()
-    if broker_name:
-        _save_session(
-            ctx,
-            {
-                "active": True,
-                "state": "awaiting_account",
-                "broker_name": broker_name,
-            },
-        )
+    if not broker_name:
+        _save_session(ctx, {"active": True, "state": "awaiting_broker", "values": {}})
         return _text_response(
-            f"开始 {broker_name} 登录流程配置。\n"
-            f"请在 {LOGIN_FLOW_TIMEOUT_SECONDS}s 内直接回复券商账号。\n"
+            f"{_broker_list_text()}\n\n"
+            f"请在 {LOGIN_FLOW_TIMEOUT_SECONDS}s 内直接回复券商名称，例如：长桥。\n"
             "发送 #q 可退出流程。"
         )
 
+    broker_id = brokers.find_broker(broker_name)
+    if not broker_id:
+        return _text_response(
+            f"暂不支持 {broker_name}：{brokers.unsupported_reason(broker_name)}\n\n{_broker_list_text()}"
+        )
+
+    broker = brokers.BROKERS[broker_id]
     _save_session(
         ctx,
-        {
-            "active": True,
-            "state": "awaiting_broker",
-        },
+        {"active": True, "state": "awaiting_field", "broker_id": broker_id, "field_index": 0, "values": {}},
     )
     return _text_response(
-        "开始券商登录流程配置。\n"
-        f"请在 {LOGIN_FLOW_TIMEOUT_SECONDS}s 内直接回复券商名称，例如：浙商证券。\n"
-        "发送 #q 可退出流程。"
+        f"开始 {broker['name']} 登录配置。\n{broker['guide']}\n\n{_field_prompt(broker, 0)}"
     )
 
 
@@ -908,6 +968,10 @@ def _cmd_config(arg, ctx):
     raw = (arg or "").strip()
     if raw in ("查看", "status", "STATUS", "查询"):
         return _cmd_config_view(ctx)
+    if raw in ("删除", "清除", "退出登录", "logout", "LOGOUT"):
+        _clear_session(ctx)
+        _remove_broker_profile(ctx)
+        return _text_response("已清除保存的券商配置。")
     return _start_config_flow(ctx, raw)
 
 
@@ -990,62 +1054,51 @@ def _resume_session(session, text, ctx):
     if state == "awaiting_broker":
         if not value:
             return _text_response("券商名称不能为空，请重新输入。")
-        _save_session(
-            ctx,
-            {
-                "active": True,
-                "state": "awaiting_account",
-                "broker_name": value,
-                "created_at": session.get("created_at", _now_iso()),
-            },
-        )
-        return _text_response(
-            f"已记录券商：{value}\n"
-            f"请在 {LOGIN_FLOW_TIMEOUT_SECONDS}s 内直接回复券商账号。\n"
-            "发送 #q 可退出流程。"
-        )
+        if not brokers.find_broker(value):
+            # 保持在选择券商这一步，刷新超时
+            _save_session(ctx, {"active": True, "state": "awaiting_broker", "values": {}})
+            return _text_response(
+                f"暂不支持 {value}：{brokers.unsupported_reason(value)}\n\n"
+                f"{_broker_list_text()}\n\n请重新回复券商名称，或发送 #q 退出。"
+            )
+        return _start_config_flow(ctx, value)
 
-    if state == "awaiting_account":
+    if state == "awaiting_field" and session.get("broker_id") in brokers.BROKERS:
+        broker_id = session["broker_id"]
+        broker = brokers.BROKERS[broker_id]
+        index = int(session.get("field_index") or 0)
         if not value:
-            return _text_response("券商账号不能为空，请重新输入。")
-        _save_session(
-            ctx,
-            {
-                "active": True,
-                "state": "awaiting_password",
-                "broker_name": session.get("broker_name", ""),
-                "account": value,
-                "created_at": session.get("created_at", _now_iso()),
-            },
-        )
-        return _text_response(
-            f"已记录账号：{value[:2]}***{value[-2:] if len(value) > 4 else value}\n"
-            f"请在 {LOGIN_FLOW_TIMEOUT_SECONDS}s 内直接回复 b64 编码后的密码。\n"
-            "发送 #q 可退出流程。"
-        )
+            return _text_response(f"{broker['fields'][index]['label']} 不能为空，请重新输入。")
 
-    if state == "awaiting_password":
-        if not value:
-            return _text_response("密码不能为空，请重新输入 b64 编码后的密码。")
-        try:
-            base64.b64decode(value.encode("utf-8"), validate=True)
-        except Exception:
-            return _text_response("密码不是合法的 b64 编码，请重新发送。")
+        values = dict(session.get("values") or {})
+        values[broker["fields"][index]["key"]] = value
+        if index + 1 < len(broker["fields"]):
+            _save_session(
+                ctx,
+                {
+                    "active": True,
+                    "state": "awaiting_field",
+                    "broker_id": broker_id,
+                    "field_index": index + 1,
+                    "values": values,
+                    "created_at": session.get("created_at", _now_iso()),
+                },
+            )
+            return _text_response(f"已记录 {broker['fields'][index]['label']}。\n{_field_prompt(broker, index + 1)}")
 
-        profile = _save_broker_profile(
-            ctx,
-            session.get("broker_name", ""),
-            session.get("account", ""),
-            value,
-        )
         _clear_session(ctx)
+        ok, error, summary = brokers.login(broker_id, values)
+        if not ok:
+            return _text_response(
+                f"{broker['name']} 登录失败，配置未保存：{error}\n请检查后重新发送 #CONFIG {broker['aliases'][0]}。"
+            )
+        profile = _save_broker_profile(ctx, broker_id, values)
         return _markdown_response(
-            "券商配置完成",
-            "券商配置已完成。\n"
-            f"- 券商: {profile.get('broker_name', '--')}\n"
+            "券商登录成功",
+            f"{broker['name']} 登录成功，配置已保存。\n"
             f"- 账号: {profile.get('account_masked', '--')}\n"
-            "- 密码: 已保存为 b64 密文\n"
-            "当前版本仅完成配置存储，尚未接入真实登录。"
+            f"{summary}\n\n"
+            "发送 #ACCOUNT 查看资产与持仓。建议撤回刚才发送的凭证消息。"
         )
 
     _clear_session(ctx)
@@ -1088,6 +1141,8 @@ def handle_skill_command(text, context=None):
         return _text_response(_cmd_ma10(tail.strip()))
     if cmd_upper == "CONFIG":
         return _cmd_config(tail.strip(), ctx)
+    if cmd_upper == "ACCOUNT":
+        return _cmd_account(ctx)
     if cmd_upper == "ANALYZE":
         return _cmd_analyze_with_context(tail.strip(), ctx, use_mcp=False)
     if cmd_upper == "ANALYZE_MCP":

@@ -98,8 +98,12 @@ When the DingTalk bot receives `#command`, it will execute rules from [`Bot_Skil
 - `#PRICE 601988`
 - `#NEWS AAPL`
 - `#ANALYZE BABA`
-- After `#CONFIG BrokerName`, users can continue by sending account and base64 password directly
-- `#CONFIG 查看` checks current config, and `#q` or `#CANCEL` aborts the active flow
+- `#CONFIG 长桥` (Longbridge) / `#CONFIG 老虎` (Tiger): in a private chat, reply with the official OpenAPI developer credentials step by step (Longbridge: App Key / App Secret / Access Token; Tiger: tiger_id / account / RSA private key). The bot performs a real login and only saves on success
+- `#ACCOUNT` shows assets and positions of the logged-in broker; `#BUY` / `#SELL` still never place real orders
+- `#CONFIG 查看` checks current config, `#CONFIG 删除` removes it, and `#q` or `#CANCEL` aborts the active flow
+- `#CONFIG 同花顺`: mainland A-share brokers are reached through a small read-only bridge running next to the broker's THS trading client on a Windows machine in your LAN; see [`tools/ths_bridge/README.md`](tools/ths_bridge/README.md)
+- Futu and IBKR need a local gateway and are not supported; credentials are stored in plain text in the SQLite database, so only run this on a machine you control
+- The Longbridge SDK's prebuilt Linux wheels need glibc ≥ 2.39 (the Docker image satisfies this); other features keep working if it cannot be installed
 - The login flow auto-exits after 60 seconds of inactivity
 
 `/api/search/web` now supports richer Tavily options, for example:

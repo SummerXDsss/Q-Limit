@@ -98,8 +98,12 @@ python3 app.py
 - `#PRICE 601988`
 - `#NEWS AAPL`
 - `#ANALYZE 中信证券`
-- `#CONFIG 浙商证券` 后可继续直接发送账号、b64 密码完成多轮配置
-- `#CONFIG 查看` 查看当前配置，`#q` 或 `#CANCEL` 取消当前流程
+- `#CONFIG 长桥` / `#CONFIG 老虎`：私聊机器人，按提示逐项回复官方 OpenAPI 的开发者凭证（长桥：App Key / App Secret / Access Token；老虎：tiger_id / 交易账户 / RSA 私钥），机器人会真实登录一次，成功才保存
+- `#ACCOUNT` 查看已登录券商的资产与持仓；`#BUY` / `#SELL` 仍不会真实下单
+- `#CONFIG 查看` 查看当前配置，`#CONFIG 删除` 清除配置，`#q` 或 `#CANCEL` 取消当前流程
+- `#CONFIG 同花顺`（或 `#CONFIG 浙商证券` / `#CONFIG 中信建投`）：A 股券商通过局域网里的同花顺客户端中转服务接入，只读资金和持仓，部署方法见 [`tools/ths_bridge/README.md`](tools/ths_bridge/README.md)
+- 富途、盈透需要本机网关，暂未接入；凭证明文保存在 SQLite 数据库中，请只在自己可控的机器上使用
+- 长桥 SDK 的 Linux 预编译包要求 glibc ≥ 2.39（Docker 镜像已满足）；系统较旧装不上时不影响其他功能
 - 登录流程 60s 内不回复会自动超时退出
 
 `/api/search/web` 现支持更完整的 Tavily 参数，例如：
