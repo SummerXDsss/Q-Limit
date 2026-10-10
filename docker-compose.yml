@@ -5,7 +5,8 @@ services:
       args:
         # 国内构建可改为 https://mirrors.aliyun.com/pypi/simple/
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
-    image: q-limit:latest
+    # 想直接用已发布的镜像而不本地构建：QLIMIT_IMAGE=ghcr.io/summerxdsss/q-limit:latest docker compose up -d --no-build
+    image: ${QLIMIT_IMAGE:-q-limit:latest}
     container_name: q-limit
     restart: unless-stopped
     ports:

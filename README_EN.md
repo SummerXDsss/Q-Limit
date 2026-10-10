@@ -115,6 +115,12 @@ When the DingTalk bot receives `#command`, it will execute rules from [`Bot_Skil
 docker compose up -d --build
 ```
 
+Or skip the local build and use the image published to GHCR by GitHub Actions (amd64 / arm64):
+
+```bash
+QLIMIT_IMAGE=ghcr.io/summerxdsss/q-limit:latest docker compose up -d --no-build
+```
+
 Open `http://127.0.0.1:5000` and fill in the AI / Tavily / DingTalk settings under **"⚙️ Settings → 🛠 服务端配置"** — no hand-written `.env` needed.
 
 - The SQLite database and `.env` live in the `qlimit-data` volume (`/app/data` in the container) and survive rebuilds.

@@ -117,6 +117,12 @@ docker compose up -d --build
 PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ docker compose up -d --build
 ```
 
+也可以不本地构建，直接使用 GitHub Actions 发布到 GHCR 的镜像（支持 amd64 / arm64）：
+
+```bash
+QLIMIT_IMAGE=ghcr.io/summerxdsss/q-limit:latest docker compose up -d --no-build
+```
+
 启动后访问 `http://127.0.0.1:5000`，在右上角 **"⚙️ 设置 → 🛠 服务端配置"** 里填写 AI / Tavily / 钉钉配置即可，无需手动准备 `.env`。
 
 - SQLite 数据库和 `.env` 都保存在数据卷 `qlimit-data`（容器内 `/app/data`）中，重建容器不会丢失。
