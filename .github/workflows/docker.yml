@@ -2,6 +2,9 @@ name: Docker 构建、冒烟测试与发布
 
 on:
   push:
+    # 同时写 branches 和 tags：只写 tags 的话分支推送不会触发
+    branches:
+      - "**"
     paths:
       - "Dockerfile"
       - "docker-compose.yml"
