@@ -1,0 +1,83 @@
+name: Docker 构建与冒烟测试
+
+on:
+  push:
+    paths:
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - ".dockerignore"
+      - "requirements.txt"
+      - "**.py"
+      - "static/**"
+      - "templates/**"
+      - ".github/workflows/docker.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建镜像
+        run: docker compose build
+
+      - name: 启动容器
+        run: docker compose up -d
+
+      - name: 等待服务就绪
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:5000/api/bot/status; then exit 0; fi
+            sleep 2
+          done
+          echo "服务未在 60s 内就绪" && exit 1
+
+      - name: 冒烟测试
+        run: |
+          set -euo pipefail
+          base=http://127.0.0.1:5000
+
+          echo "== 页面与静态资源"
+          curl -fsS -o /dev/null "$base/"
+          curl -fsS -o /dev/null "$base/static/js/settings.js"
+
+          echo "== 非 root 运行"
+          test "$(docker compose exec -T q-limit id -u)" != "0"
+
+          echo "== 通过接口保存配置并写入数据卷"
+          curl -fsS -X PUT "$base/api/settings/env" -H 'Content-Type: application/json' \
+            -d '{"values":{"AI_DEFAULT_MODEL":"ci-model","TAVILY_API_KEY":"tvly-ci"}}'
+          docker compose exec -T q-limit grep -q '^AI_DEFAULT_MODEL=ci-model$' /app/data/.env
+          curl -fsS "$base/api/ai/models" | grep -q '"model": *"ci-model"'
+
+          echo "== 密钥不回显"
+          ! curl -fsS "$base/api/settings/env" | grep -q 'tvly-ci'
+
+          echo "== 机器人命令（不依赖外部网络）"
+          curl -fsS -X POST "$base/api/bot/command" -H 'Content-Type: application/json' \
+            -d '{"text":"#HELP"}' | grep -q '"handled": *true'
+
+          echo "== 重建容器后配置仍在"
+          docker compose up -d --force-recreate
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null "$base/api/bot/status"; then break; fi
+            sleep 2
+          done
+          curl -fsS "$base/api/ai/models" | grep -q '"model": *"ci-model"'
+
+          echo "== 健康检查"
+          for i in $(seq 1 30); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' q-limit)
+            if [ "$status" = "healthy" ]; then break; fi
+            sleep 2
+          done
+          test "$status" = "healthy"
+
+      - name: 输出容器日志
+        if: always()
+        run: docker compose logs --no-color | tail -n 200
