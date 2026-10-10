@@ -87,8 +87,10 @@ AI 对话同样如此：`/api/chat`、`/api/chat/debate` 的请求体带 `market
 - `dingtalk_robot.py`：启动守护线程跑 Stream 客户端，收消息 → 去重 → 交给 `bot_skills.handle_incoming_message` → 通过 session webhook 回复。
 - `bot_skills.py`：`handle_skill_command` 是一长串 `if cmd_upper == ...` 分发。命令规格写在根目录的 `Bot_Skills.txt`，这个文件**同时在运行时被读取**用于生成 `#HELP` 输出——增删命令时两处都要改。
 - 多轮流程（`#CONFIG` 券商登录）的状态存在 `bot_sessions`，按 user + conversation 定位，60 秒超时；有进行中的会话时，非 `#` 开头的文本会被当作该流程的输入。
+- 券商接入在 `services/brokers.py`：`BROKERS` 声明每家券商要收集的凭证字段，`_FETCHERS` 里是对应的登录 + 资产/持仓查询（SDK 懒加载）。长桥（`longbridge`）和老虎（`tigeropen`）用官方 OpenAPI 的个人开发者凭证；A 股券商走 `ths`：Q-Limit 只请求局域网里的中转服务 `tools/ths_bridge`（独立脚本，跑在装了同花顺版下单客户端的 Windows 上，用 easytrader 读资金和持仓，只读、带口令，不打进 Docker 镜像），各券商客户端字段名不同，映射在 `_THS_BALANCE_KEYS` / `_THS_POSITION_KEYS`。富途 / 盈透需要本机网关，`unsupported_reason` 会直接告诉用户原因。**新增券商 = 在这两个表里各加一项**，`#CONFIG` 流程不用改。
+- `#CONFIG` 收齐凭证后会真实登录，成功才写入 `broker_accounts`（明文存在 SQLite 里），失败不保存；群聊（`conversation_type == "2"`）里拒绝 `#CONFIG`，`#ACCOUNT` 也不回资产。
 - `#ANALYZE` 复用 `ai_chat.chat_with_role("judge", ...)`，AI 失败时必须退回 `_fallback_analysis_markdown` 输出已抓取的材料，而不是只报错。
-- `#BUY` / `#SELL` 只是占位，没有真实下单。
+- `#BUY` / `#SELL` 只是占位，没有真实下单（即使已登录券商）。
 - `_resolve_stock` 把用户输入解析成标的：支持 `.SH/.SZ/.HK/.US/.SG` 市场后缀；同名多地上市且未指定时优先 A 股，否则取搜索结果第一条。
 - `/api/bot/status` 的 `alive` 只表示线程存活，是否真的连上钉钉看 `connected` / `last_error`（由 SDK 日志捕获，凭证错误时 SDK 只会无限重试而不退出）。
 - `notifier.py` 是另一条独立通道：自定义机器人 webhook 的单向推送（辩论裁判结果等），与 Stream 机器人的配置项互不相干。
