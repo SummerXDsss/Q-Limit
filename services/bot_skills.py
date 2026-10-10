@@ -14,6 +14,7 @@ SESSION_COLLECTION = "bot_sessions"
 BROKER_COLLECTION = "broker_accounts"
 PREFERENCE_COLLECTION = "bot_user_preferences"
 LOGIN_FLOW_TIMEOUT_SECONDS = 60
+_MARKET_SUFFIXES = {"SH", "SZ", "HK", "US", "SG"}
 
 
 def _now_iso():
@@ -102,6 +103,7 @@ def _help_text():
         "常用示例：",
         "- #PRICE AAPL",
         "- #NEWS 中信证券",
+        "- #PRICE 中信证券.HK（同名多地上市默认取 A 股，可加 .HK/.SH/.SZ/.US 指定）",
         "- #ANALYZE 601998",
         "- #GRAPH on",
         "- #CONFIG 浙商证券",
@@ -319,11 +321,27 @@ def _resolve_stock(keyword):
     if not keyword:
         return None, "请提供股票代码或名称。"
 
+    # 支持 600030.SH / 中信证券.HK 这样的市场后缀
+    wanted_market = ""
+    head, sep, tail = keyword.rpartition(".")
+    if sep and head.strip() and tail.strip().upper() in _MARKET_SUFFIXES:
+        keyword, wanted_market = head.strip(), tail.strip().upper()
+
     results = stock_data.search_stock(keyword)
+    if wanted_market:
+        results = [r for r in results if (r.get("market") or "").upper() == wanted_market]
+        if not results:
+            return None, f"未找到股票：{keyword}.{wanted_market}"
     if not results:
         return None, f"未找到股票：{keyword}"
 
     item = results[0]
+    if not wanted_market:
+        # 同名多地上市（如 中信证券 同时有港股和 A 股）时优先 A 股，其他市场用后缀指定
+        same_name = [r for r in results if r.get("name") == keyword]
+        a_share = [r for r in same_name if (r.get("market") or "").upper() in ("SH", "SZ")]
+        if item in same_name and a_share:
+            item = a_share[0]
     return {
         "code": item.get("code", ""),
         "name": item.get("name", "") or item.get("code", ""),

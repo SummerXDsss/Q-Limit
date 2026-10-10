@@ -6,6 +6,7 @@
 """
 import hashlib
 import json
+import logging
 import threading
 
 import requests
@@ -22,6 +23,23 @@ PROCESSED_MESSAGE_COLLECTION = "bot_processed_messages"
 
 _client_thread = None
 _started = False
+# Stream 长连接的真实状态：线程活着不代表已连上（凭证错误时 SDK 只会不断重试）
+_connection = {"connected": False, "last_error": ""}
+_CONNECTION_ERROR_PREFIXES = ("open connection failed, error=", "[start] network exception", "unknown exception")
+
+
+class _ConnectionErrorHandler(logging.Handler):
+    """从 SDK 日志里捕获连接失败原因"""
+
+    def emit(self, record):
+        try:
+            message = record.getMessage()
+        except Exception:
+            # SDK 的 logger.exception('unknown exception', e) 占位符不匹配
+            message = f"{record.msg} {record.args}"
+        if message.startswith(_CONNECTION_ERROR_PREFIXES):
+            _connection["connected"] = False
+            _connection["last_error"] = message[:300]
 
 
 def _extract_text_content(incoming, raw):
@@ -181,7 +199,19 @@ def start_dingtalk_stream_bot():
             client_id=DINGTALK_CLIENT_ID,
             client_secret=DINGTALK_CLIENT_SECRET,
         )
-        client = dingtalk_stream.DingTalkStreamClient(credential)
+
+        class TrackedClient(dingtalk_stream.DingTalkStreamClient):
+            def open_connection(self):
+                connection = super().open_connection()
+                if connection:
+                    _connection["connected"] = True
+                    _connection["last_error"] = ""
+                else:
+                    _connection["connected"] = False
+                return connection
+
+        client = TrackedClient(credential)
+        client.logger.addHandler(_ConnectionErrorHandler(level=logging.ERROR))
         client.register_callback_handler(
             dingtalk_stream.ChatbotMessage.TOPIC,
             _build_handler(dingtalk_stream),
@@ -195,6 +225,11 @@ def start_dingtalk_stream_bot():
 
 
 def get_stream_status():
-    if _client_thread and _client_thread.is_alive():
-        return {"enabled": DINGTALK_STREAM_ENABLED, "started": True, "alive": True}
-    return {"enabled": DINGTALK_STREAM_ENABLED, "started": _started, "alive": False}
+    alive = bool(_client_thread and _client_thread.is_alive())
+    return {
+        "enabled": DINGTALK_STREAM_ENABLED,
+        "started": _started,
+        "alive": alive,
+        "connected": alive and _connection["connected"],
+        "last_error": _connection["last_error"],
+    }
