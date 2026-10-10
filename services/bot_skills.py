@@ -305,6 +305,9 @@ def _save_broker_profile(ctx, broker_id, credentials):
         "broker_name": broker["name"],
         "account_masked": brokers.mask(credentials.get(first_key, "")),
         "credentials": dict(credentials),
+        # 清掉旧版流程留下的账号和 b64 密码
+        "account": "",
+        "password_b64": "",
         "active": True,
         "updated_at": _now_iso(),
         "configured_at": _now_iso(),
@@ -1087,7 +1090,7 @@ def _resume_session(session, text, ctx):
         ok, error, summary = brokers.login(broker_id, values)
         if not ok:
             return _text_response(
-                f"{broker['name']} 登录失败，配置未保存：{error}\n请检查凭证后重新发送 #CONFIG {broker['name']}。"
+                f"{broker['name']} 登录失败，配置未保存：{error}\n请检查后重新发送 #CONFIG {broker['aliases'][0]}。"
             )
         profile = _save_broker_profile(ctx, broker_id, values)
         return _markdown_response(
