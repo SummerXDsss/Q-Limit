@@ -6,12 +6,18 @@
 - 网页和钉钉机器人共用这一份配置和这一套校验
 """
 import hmac
+import time
 from datetime import datetime
 
 from config import THS_BRIDGE_URL, THS_BRIDGE_TOKEN, TRADE_ENABLED, TRADE_PIN
 from services import app_log, brokers
 
 MAX_ORDER_AMOUNT = 1_000_000
+MAX_ORDER_PRICE = 100_000
+# 口令连续输错的锁定：窗口内错满次数后，窗口结束前一律拒绝（进程内状态，重启清零）
+PIN_MAX_FAILURES = 5
+PIN_LOCK_SECONDS = 600
+_pin_failures = []
 
 
 def _credentials():
@@ -64,8 +70,15 @@ def _check_trade_allowed(pin):
         return "服务端未开启网页交易（TRADE_ENABLED）"
     if not TRADE_PIN:
         return "服务端还没有设置交易口令（TRADE_PIN），为避免局域网内他人下单，必须先设置"
+    now = time.time()
+    _pin_failures[:] = [t for t in _pin_failures if now - t < PIN_LOCK_SECONDS]
+    if len(_pin_failures) >= PIN_MAX_FAILURES:
+        wait = int(PIN_LOCK_SECONDS - (now - _pin_failures[0])) // 60 + 1
+        return f"交易口令连续输错 {PIN_MAX_FAILURES} 次，已暂停交易，请约 {wait} 分钟后再试"
     if not hmac.compare_digest(str(pin or "").encode("utf-8"), TRADE_PIN.encode("utf-8")):
+        _pin_failures.append(now)
         return "交易口令错误"
+    _pin_failures.clear()
     return ""
 
 
@@ -82,9 +95,10 @@ def _validate_order(side, code, price, amount):
         if float(amount) != int(float(amount)):
             raise ValueError
         amount = int(float(amount))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None, None, None, None, "价格或数量不是有效数字"
-    if price <= 0:
+    # 写成区间判断，NaN / inf 也会被挡住
+    if not 0 < price < MAX_ORDER_PRICE:
         return None, None, None, None, "价格必须大于 0"
     if amount <= 0 or amount > MAX_ORDER_AMOUNT:
         return None, None, None, None, f"数量必须在 1 到 {MAX_ORDER_AMOUNT} 之间"

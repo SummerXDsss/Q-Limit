@@ -87,7 +87,7 @@ AI 对话同样如此：`/api/chat`、`/api/chat/debate` 的请求体带 `market
 右上角交易按钮打开的弹窗，只对接同花顺中转（A 股）。账户是**服务端级别**的：`THS_BRIDGE_URL` / `THS_BRIDGE_TOKEN` 存在 `.env`（设置面板「同花顺交易」分组），**网页和钉钉机器人共用这一份**——机器人的 `#CONFIG 同花顺` 登录成功后也是写进 `.env`，`#ACCOUNT` / `#ORDERS` / `#TRADES` / `#BUY` / `#SELL` / `#REVOKE` 都走 `services/trade.py`，开关和校验完全一致。只有长桥 / 老虎是按用户存在 `broker_accounts` 里的个人配置（只能查资产）。
 
 - 查询：`GET /api/trade/status|account|orders|trades`。中转服务每次读客户端要几秒（要过验证码）且只能串行，所以前端**不轮询**，只在打开弹窗、切 Tab、下单 / 撤单后刷新。
-- 下单 / 撤单：`POST /api/trade/order|cancel`，要同时满足三层开关才会放行——`.env` 里 `TRADE_ENABLED=true`、设置了 `TRADE_PIN`（请求体每次都带 `pin`）、中转服务以 `--allow-trade` 启动。只有限价单；校验（6 位代码、买入手数规则）在 `trade._validate_order`。
+- 下单 / 撤单：`POST /api/trade/order|cancel`，要同时满足三层开关才会放行——`.env` 里 `TRADE_ENABLED=true`、设置了 `TRADE_PIN`（请求体每次都带 `pin`）、中转服务以 `--allow-trade` 启动。只有限价单；校验（6 位代码、买入手数规则）在 `trade._validate_order`。口令 10 分钟内连续输错 5 次会暂停交易到窗口结束（进程内计数，网页和机器人共用）。
 - 每次下单 / 撤单请求（含被拒绝的）都记一条运行日志（分类 `trade`，`detail.source` 是 `web:IP` 或 `bot:用户`）。
 - 中转服务报错时委托可能已经报出，错误信息会提示去客户端核对；不要在后端加自动重试。
 - 各券商客户端的委托 / 成交列名不一致，映射在 `brokers._THS_ORDER_KEYS`，哪些状态算"不可撤"在 `_THS_FINAL_STATUS`。

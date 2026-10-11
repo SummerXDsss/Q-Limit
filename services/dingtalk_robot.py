@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import threading
+import time
 
 import requests
 
@@ -26,6 +27,7 @@ _client_thread = None
 _started = False
 # Stream 长连接的真实状态：线程活着不代表已连上（凭证错误时 SDK 只会不断重试）
 _connection = {"connected": False, "last_error": ""}
+_last_error_logged_at = 0.0
 _CONNECTION_ERROR_PREFIXES = ("open connection failed, error=", "[start] network exception", "unknown exception")
 
 
@@ -39,8 +41,10 @@ class _ConnectionErrorHandler(logging.Handler):
             # SDK 的 logger.exception('unknown exception', e) 占位符不匹配
             message = f"{record.msg} {record.args}"
         if message.startswith(_CONNECTION_ERROR_PREFIXES):
-            # 凭证错误时 SDK 会一直重试，同一条错误只记一次日志
-            if _connection["last_error"] != message[:300]:
+            # 凭证错误时 SDK 每隔几秒重试一次（每次 requestid 都不同），限制成最多 10 分钟记一条
+            global _last_error_logged_at
+            if time.time() - _last_error_logged_at > 600:
+                _last_error_logged_at = time.time()
                 app_log.log("system", f"钉钉 Stream 连接异常：{message[:200]}", "error")
             _connection["connected"] = False
             _connection["last_error"] = message[:300]

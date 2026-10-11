@@ -1283,7 +1283,8 @@ def _loggable_text(text, in_flow):
         return "（配置流程输入，已隐藏）"
     if text.upper().startswith(_SECRET_COMMANDS):
         parts = text.split()
-        if (parts[0].upper() == "#REVOKE" and len(parts) >= 3) or len(parts) >= 5:
+        # 参数不全时最后一项也可能是口令（比如漏写了价格），一并抹掉
+        if len(parts) >= (3 if parts[0].upper() == "#REVOKE" else 4):
             parts[-1] = "****"
         return " ".join(parts)
     return text[:200]
