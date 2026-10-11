@@ -111,6 +111,14 @@ def get_account(broker_id, credentials):
         return None, _clean_error(e)
 
 
+def get_account_or_raise(broker_id, credentials):
+    """同 get_account，但失败时抛异常，供需要自己处理错误的调用方使用"""
+    account, error = get_account(broker_id, credentials)
+    if error:
+        raise RuntimeError(error)
+    return account
+
+
 def format_account(account, with_positions=True):
     lines = []
     for item in account.get("assets", []):
@@ -244,13 +252,18 @@ def _ths_symbol(value):
     return text.zfill(6) if text.isdigit() else text
 
 
-def _fetch_ths(credentials):
+def _ths_request(credentials, method, path, body=None):
+    """请求中转服务，返回 data；失败抛 RuntimeError（消息可直接给用户看）"""
     base_url = str(credentials.get("bridge_url", "")).strip().rstrip("/")
+    if not base_url:
+        raise RuntimeError("还没有配置中转服务地址")
     if not base_url.startswith(("http://", "https://")):
         base_url = "http://" + base_url
     try:
-        resp = requests.get(
-            f"{base_url}/account",
+        resp = requests.request(
+            method,
+            f"{base_url}{path}",
+            json=body,
             headers={"X-Bridge-Token": str(credentials.get("token", "")).strip()},
             timeout=THS_TIMEOUT_SECONDS,
             # 中转服务在局域网里，不走系统代理
@@ -265,8 +278,83 @@ def _fetch_ths(credentials):
     if resp.status_code != 200 or not isinstance(payload, dict) or "data" not in payload:
         detail = payload.get("error") if isinstance(payload, dict) else ""
         raise RuntimeError(detail or f"中转服务返回异常（HTTP {resp.status_code}），请确认地址指向的是 ths_bridge")
+    return payload.get("data")
 
-    data = payload.get("data") or {}
+
+def ths_health(credentials):
+    """中转服务自身状态（不需要口令）：{"ok", "mock", "trade"}；连不上返回 None"""
+    base_url = str(credentials.get("bridge_url", "")).strip().rstrip("/")
+    if not base_url:
+        return None
+    if not base_url.startswith(("http://", "https://")):
+        base_url = "http://" + base_url
+    try:
+        resp = requests.get(f"{base_url}/health", timeout=5, proxies={"http": None, "https": None})
+        data = resp.json()
+        return data if isinstance(data, dict) and data.get("ok") else None
+    except (requests.RequestException, ValueError):
+        return None
+
+
+_THS_ORDER_KEYS = {
+    "entrust_no": ("合同编号", "委托编号", "委托序号", "申请编号"),
+    "time": ("委托时间", "成交时间", "申报时间"),
+    "symbol": ("证券代码", "股票代码"),
+    "name": ("证券名称", "股票名称"),
+    "side": ("操作", "买卖标志", "委托类别", "买卖", "委托方向"),
+    "status": ("备注", "委托状态", "状态说明", "状态"),
+    "price": ("委托价格", "成交均价", "成交价格"),
+    "quantity": ("委托数量", "成交数量"),
+    "filled_quantity": ("成交数量",),
+    "filled_price": ("成交均价", "成交价格"),
+    "amount": ("成交金额",),
+}
+# 这些状态的委托已经结束，不能再撤
+_THS_FINAL_STATUS = ("已成", "全部成交", "已撤", "全部撤单", "废单", "撤单", "已报待撤")
+
+
+def _ths_rows(rows, final_check=False):
+    result = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        item = {key: _pick(row, keys) for key, keys in _THS_ORDER_KEYS.items()}
+        item["symbol"] = _ths_symbol(item["symbol"])
+        for key in ("entrust_no", "time", "name", "side", "status"):
+            item[key] = str(item[key] or "").strip()
+        if final_check:
+            item["cancelable"] = bool(item["entrust_no"]) and not any(
+                word in item["status"] for word in _THS_FINAL_STATUS
+            )
+        result.append(item)
+    return result
+
+
+def ths_orders(credentials):
+    """当日委托，统一字段后返回"""
+    return _ths_rows(_ths_request(credentials, "GET", "/orders"), final_check=True)
+
+
+def ths_trades(credentials):
+    """当日成交"""
+    return _ths_rows(_ths_request(credentials, "GET", "/trades"))
+
+
+def ths_place_order(credentials, side, code, price, amount):
+    """限价委托，返回中转服务给出的结果（通常含 entrust_no 或 message）"""
+    result = _ths_request(
+        credentials, "POST", "/order", {"side": side, "code": code, "price": price, "amount": amount}
+    )
+    return result if isinstance(result, dict) else {"message": str(result)}
+
+
+def ths_cancel_order(credentials, entrust_no):
+    result = _ths_request(credentials, "POST", "/cancel", {"entrust_no": entrust_no})
+    return result if isinstance(result, dict) else {"message": str(result)}
+
+
+def _fetch_ths(credentials):
+    data = _ths_request(credentials, "GET", "/account") or {}
     balance = data.get("balance") or {}
     if isinstance(balance, list):
         balance = balance[0] if balance else {}

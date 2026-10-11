@@ -122,6 +122,15 @@ DINGTALK_SECRET = os.environ.get("DINGTALK_SECRET", "")
 DINGTALK_AT_MOBILES = [m.strip() for m in os.environ.get("DINGTALK_AT_MOBILES", "").split(",") if m.strip()]
 DINGTALK_NOTIFY_ON_DEBATE = _env_bool("DINGTALK_NOTIFY_ON_DEBATE", False)
 
+# 运行日志（app_logs）保留天数
+LOG_RETENTION_DAYS = _env_int("LOG_RETENTION_DAYS", 14)
+
+# 网页端交易：同花顺中转服务（tools/ths_bridge）
+THS_BRIDGE_URL = _env_str("THS_BRIDGE_URL", "")
+THS_BRIDGE_TOKEN = _env_str("THS_BRIDGE_TOKEN", "")
+TRADE_ENABLED = _env_bool("TRADE_ENABLED", False)
+TRADE_PIN = _env_str("TRADE_PIN", "")
+
 # 应用机器人（Stream 模式）
 DINGTALK_STREAM_ENABLED = _env_bool("DINGTALK_STREAM_ENABLED", False)
 DINGTALK_CLIENT_ID = os.environ.get("DINGTALK_CLIENT_ID", os.environ.get("DINGTALK_APP_KEY", ""))

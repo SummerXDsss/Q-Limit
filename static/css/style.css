@@ -3244,3 +3244,561 @@ body {
     font-size: 11px;
     color: var(--text-tertiary);
 }
+
+/* ============================================================
+   交易弹窗（同花顺中转）
+   ============================================================ */
+.modal-content.trade-modal {
+    width: min(960px, 94vw);
+    max-height: 88vh;
+}
+
+.trade-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.trade-badge {
+    margin-left: 8px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 999px;
+    vertical-align: middle;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+.trade-badge:empty {
+    display: none;
+}
+
+.trade-badge.is-live {
+    background: var(--accent-blue-dim);
+    color: var(--accent-blue);
+}
+
+.trade-badge.is-mock {
+    background: var(--judge-bg);
+    color: var(--judge-color);
+}
+
+.trade-notice {
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
+.trade-notice.is-error {
+    color: #ff5252;
+    border-color: rgba(255, 82, 82, 0.35);
+}
+
+.trade-assets {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.trade-assets:empty {
+    display: none;
+}
+
+.trade-asset {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+.trade-asset-label {
+    font-size: 11px;
+    color: var(--text-tertiary);
+}
+
+.trade-asset-value {
+    font-size: 16px;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.trade-layout {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+}
+
+.trade-form {
+    padding: 14px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+.trade-side-switch {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.trade-side {
+    padding: 7px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.trade-side.active[data-side="buy"] {
+    color: #fff;
+    background: var(--up-color);
+    border-color: var(--up-color);
+}
+
+.trade-side.active[data-side="sell"] {
+    color: #fff;
+    background: var(--down-color);
+    border-color: var(--down-color);
+}
+
+.trade-stock-name,
+.trade-hint {
+    margin-left: 6px;
+    color: var(--text-tertiary);
+    font-weight: 400;
+}
+
+.trade-estimate {
+    min-height: 18px;
+    margin-bottom: 10px;
+    font-size: 12px;
+    color: var(--text-tertiary);
+}
+
+.trade-submit {
+    width: 100%;
+    color: #fff;
+}
+
+.trade-submit.buy {
+    background: var(--up-color);
+}
+
+.trade-submit.sell {
+    background: var(--down-color);
+}
+
+.trade-submit:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.trade-confirm-text {
+    margin-bottom: 10px;
+    padding: 10px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-hover);
+    border-radius: var(--radius-sm);
+}
+
+.trade-confirm-actions {
+    display: grid;
+    grid-template-columns: 1fr 1.4fr;
+    gap: 6px;
+}
+
+.trade-confirm-actions .btn {
+    padding: 8px 0;
+}
+
+.trade-result {
+    margin-top: 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    word-break: break-all;
+}
+
+.trade-result:empty {
+    display: none;
+}
+
+.trade-result.is-ok {
+    color: var(--accent-blue);
+}
+
+.trade-result.is-error {
+    color: #ff5252;
+}
+
+.trade-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.trade-tab {
+    padding: 8px 14px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.trade-tab.active {
+    color: var(--accent-blue);
+    border-bottom-color: var(--accent-blue);
+}
+
+.trade-table-wrap {
+    max-height: 46vh;
+    overflow: auto;
+}
+
+.trade-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.trade-table th,
+.trade-table td {
+    padding: 8px 10px;
+    text-align: left;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.trade-table th {
+    position: sticky;
+    top: 0;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    background: var(--bg-secondary);
+}
+
+.trade-table th.num {
+    text-align: right;
+}
+
+.trade-table td.num {
+    text-align: right;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.trade-table td.side-buy {
+    color: var(--up-color);
+}
+
+.trade-table td.side-sell {
+    color: var(--down-color);
+}
+
+.trade-row-btn.is-armed {
+    color: #ff5252;
+    border-color: rgba(255, 82, 82, 0.5);
+}
+
+.trade-empty {
+    padding: 36px 12px;
+    font-size: 12px;
+    text-align: center;
+    color: var(--text-tertiary);
+}
+
+@media (max-width: 760px) {
+    .trade-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ============================================================
+   记录弹窗：分析历史 / 运行日志
+   ============================================================ */
+.modal-content.records-modal {
+    width: min(1040px, 94vw);
+    height: 86vh;
+    max-height: 86vh;
+}
+
+.records-view {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 300px minmax(0, 1fr);
+}
+
+.records-view.records-logs {
+    display: flex;
+    flex-direction: column;
+}
+
+.records-sidebar {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-right: 1px solid var(--border-color);
+}
+
+.records-search,
+.records-toolbar select {
+    padding: 7px 10px;
+    font-size: 12px;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    outline: none;
+}
+
+.records-search:focus,
+.records-toolbar select:focus {
+    border-color: var(--accent-blue);
+}
+
+.records-sidebar .records-search {
+    margin: 12px;
+}
+
+.records-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 8px 8px;
+}
+
+.records-item {
+    display: block;
+    width: 100%;
+    margin-bottom: 4px;
+    padding: 10px;
+    text-align: left;
+    color: var(--text-primary);
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.records-item:hover {
+    background: var(--bg-hover);
+}
+
+.records-item.active {
+    background: var(--accent-blue-dim);
+    border-color: var(--accent-blue);
+}
+
+.records-item-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.records-item-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.records-item-time {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums;
+}
+
+.records-item-title {
+    margin: 4px 0 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.records-item-meta {
+    display: flex;
+    gap: 4px;
+}
+
+.records-tag {
+    padding: 1px 6px;
+    font-size: 10px;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.records-tag.cat-trade {
+    color: var(--judge-color);
+    background: var(--judge-bg);
+}
+
+.records-tag.cat-ai {
+    color: var(--accent-purple);
+}
+
+.records-tag.cat-bot {
+    color: var(--accent-cyan);
+}
+
+.records-detail {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+
+.records-detail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.records-detail-title {
+    font-size: 13px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.records-detail-actions {
+    display: flex;
+    flex-shrink: 0;
+    gap: 6px;
+}
+
+.records-delete {
+    color: #ff5252;
+}
+
+.records-detail-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.records-empty {
+    padding: 48px 16px;
+    font-size: 12px;
+    line-height: 1.7;
+    text-align: center;
+    color: var(--text-tertiary);
+}
+
+.records-empty.is-error {
+    color: #ff5252;
+}
+
+.records-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.records-toolbar .records-search {
+    flex: 1;
+    min-width: 140px;
+}
+
+.records-log-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 16px 16px;
+}
+
+.records-log {
+    border-bottom: 1px solid var(--border-color);
+}
+
+.records-log summary {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 8px 0;
+    font-size: 12px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.records-log summary::-webkit-details-marker {
+    display: none;
+}
+
+.records-log-time {
+    flex-shrink: 0;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.records-log-message {
+    min-width: 0;
+    color: var(--text-primary);
+    word-break: break-word;
+}
+
+.records-log.level-error .records-log-message {
+    color: #ff5252;
+}
+
+.records-log.level-warning .records-log-message {
+    color: var(--judge-color);
+}
+
+.records-log-detail {
+    margin: 0 0 10px;
+    padding: 10px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+@media (max-width: 760px) {
+    .records-view {
+        grid-template-columns: 1fr;
+        grid-template-rows: 38% minmax(0, 1fr);
+    }
+
+    .records-sidebar {
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+    }
+}

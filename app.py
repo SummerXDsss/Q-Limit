@@ -6,7 +6,7 @@ import os
 from flask import Flask, render_template, request, jsonify, Response, stream_with_context
 from config import FLASK_HOST, FLASK_PORT, FLASK_DEBUG, SECRET_KEY, SETTINGS_ALLOW_REMOTE
 from services import stock_data, analysis, valuation, news, financial, ai_chat, web_search, notifier
-from services import bot_skills, dingtalk_robot, env_settings
+from services import app_log, bot_skills, dingtalk_robot, env_settings, trade
 from services.pattern_detector import analyze_patterns
 
 app = Flask(__name__)
@@ -389,6 +389,46 @@ def api_chat_history():
     return jsonify({"data": data})
 
 
+@app.route("/api/chat/sessions", methods=["GET", "DELETE"])
+def api_chat_sessions():
+    """
+    GET: 历史会话列表（?q=关键词&limit=100）
+    DELETE: 删除一个会话，Body: {"stock_code": "...", "session_id": "..."}
+    """
+    if request.method == "DELETE":
+        body = request.get_json(silent=True) or {}
+        session_id = body.get("session_id") or ""
+        if not session_id:
+            return jsonify({"error": "缺少 session_id"}), 400
+        deleted = ai_chat.delete_chat_session(body.get("stock_code") or "", session_id)
+        return jsonify({"data": {"deleted": deleted}})
+    data = ai_chat.list_chat_sessions(request.args.get("q", ""), request.args.get("limit", 100, type=int))
+    return jsonify({"data": data})
+
+
+@app.route("/api/chat/session")
+def api_chat_session():
+    """某个历史会话的全部消息（时间正序）"""
+    data = ai_chat.get_session_messages(request.args.get("stock_code", ""), request.args.get("session_id", ""))
+    return jsonify({"data": data})
+
+
+# ============================================================
+# 运行日志 API
+# ============================================================
+
+@app.route("/api/logs")
+def api_logs():
+    """运行日志（?category=trade|bot|ai|settings|system&level=&q=&limit=200），访问限制同服务端配置"""
+    if not _is_local_request():
+        return jsonify({"error": "仅允许本机访问（可设置 SETTINGS_ALLOW_REMOTE=true 放开）"}), 403
+    data = app_log.query(
+        request.args.get("category", ""), request.args.get("level", ""),
+        request.args.get("q", ""), request.args.get("limit", 200, type=int),
+    )
+    return jsonify({"data": data})
+
+
 # ============================================================
 # AI 模型配置 API
 # ============================================================
@@ -501,6 +541,8 @@ def api_bot_command():
         return jsonify({"error": "text 不能为空"}), 400
 
     context = {
+        "source": "api",
+        "conversation_type": str(body.get("conversation_type") or ""),
         "user_id": body.get("user_id") or "debug-user",
         "conversation_id": body.get("conversation_id") or "debug-conversation",
         "sender_nick": body.get("sender_nick") or "debug",
@@ -524,6 +566,62 @@ def api_bot_status():
 
 
 # ============================================================
+# 交易 API（同花顺中转）
+# ============================================================
+
+def _trade_response(data, error):
+    if error:
+        return jsonify({"error": error}), 400
+    return jsonify({"data": data})
+
+
+@app.route("/api/trade/status")
+def api_trade_status():
+    """交易面板的开关状态与中转服务在线情况"""
+    return jsonify({"data": trade.get_status()})
+
+
+@app.route("/api/trade/account")
+def api_trade_account():
+    """资产与持仓"""
+    return _trade_response(*trade.get_account())
+
+
+@app.route("/api/trade/orders")
+def api_trade_orders():
+    """当日委托"""
+    return _trade_response(*trade.get_orders())
+
+
+@app.route("/api/trade/trades")
+def api_trade_trades():
+    """当日成交"""
+    return _trade_response(*trade.get_trades())
+
+
+@app.route("/api/trade/order", methods=["POST"])
+def api_trade_order():
+    """
+    限价委托
+    Body: {"side": "buy"|"sell", "code": "600030", "price": 25.1, "amount": 100, "pin": "..."}
+    """
+    body = request.get_json(silent=True) or {}
+    return _trade_response(*trade.place_order(
+        body.get("side"), body.get("code"), body.get("price"), body.get("amount"),
+        body.get("pin"), source=f"web:{request.remote_addr or ''}",
+    ))
+
+
+@app.route("/api/trade/cancel", methods=["POST"])
+def api_trade_cancel():
+    """撤单 Body: {"entrust_no": "...", "pin": "..."}"""
+    body = request.get_json(silent=True) or {}
+    return _trade_response(*trade.cancel_order(
+        body.get("entrust_no"), body.get("pin"), source=f"web:{request.remote_addr or ''}",
+    ))
+
+
+# ============================================================
 # 启动
 # ============================================================
 
@@ -531,6 +629,7 @@ def start_background_services():
     """启动随进程常驻的后台服务（钉钉 Stream 机器人）；wsgi.py 也会调用"""
     ok, msg = dingtalk_robot.start_dingtalk_stream_bot()
     print(f"  🤖 钉钉机器人: {msg}")
+    app_log.log("system", f"服务启动，钉钉机器人: {msg}")
 
 
 if __name__ == "__main__":
