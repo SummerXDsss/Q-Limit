@@ -2,7 +2,8 @@
 同花顺下单客户端中转服务（在 Windows 机器上单独运行，不属于 Q-Limit 主服务）
 
 作用：把已登录的同花顺版下单客户端（xiadan.exe）里的资金和持仓，
-通过带口令的 HTTP 接口提供给局域网里的 Q-Limit。只读，不提供下单接口。
+通过带口令的 HTTP 接口提供给局域网里的 Q-Limit。默认只读；
+加 --allow-trade 后才开放限价买卖和撤单。
 
 用法见同目录 README.md。快速开始：
     pip install -r requirements.txt
@@ -14,6 +15,7 @@ import json
 import os
 import secrets
 import threading
+import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -27,6 +29,8 @@ MOCK_ACCOUNT = {
         {"证券代码": "000001", "证券名称": "平安银行", "股票余额": 2000, "可用余额": 0, "参考成本价": 12.5, "市价": 13.0},
     ],
 }
+
+_mock_orders = []
 
 # 同花顺客户端是单个窗口，所有操作必须串行
 _client_lock = threading.Lock()
@@ -142,22 +146,91 @@ def _connect(exe_path):
     return trader
 
 
-def read_account(options):
-    """返回 {"balance": {...}, "position": [...]}，字段名保持客户端原样"""
+def _with_trader(options, action):
+    """串行地在已连接的客户端上执行 action(trader)"""
     global _trader
-    if options.mock:
-        return MOCK_ACCOUNT
-
     with _client_lock:
         try:
             if _trader is None:
                 _trader = _connect(options.exe)
-            # 剪贴板策略在空表格时会返回 None，统一兜成空列表
-            return {"balance": _trader.balance, "position": _trader.position or []}
+            return action(_trader)
         except Exception:
             # 客户端被关掉、重启或弹窗卡住后，下次请求重新连接
             _trader = None
             raise
+
+
+def read_account(options):
+    """返回 {"balance": {...}, "position": [...]}，字段名保持客户端原样"""
+    if options.mock:
+        return MOCK_ACCOUNT
+    # 剪贴板策略在空表格时会返回 None，统一兜成空列表
+    return _with_trader(options, lambda t: {"balance": t.balance, "position": t.position or []})
+
+
+def read_orders(options):
+    """当日委托"""
+    if options.mock:
+        return list(_mock_orders)
+    return _with_trader(options, lambda t: t.today_entrusts or [])
+
+
+def read_trades(options):
+    """当日成交"""
+    if options.mock:
+        return []
+    return _with_trader(options, lambda t: t.today_trades or [])
+
+
+def _parse_order(body):
+    """校验下单参数，返回 (side, code, price, amount)；不合法时抛 ValueError"""
+    side = str(body.get("side", "")).lower()
+    if side not in ("buy", "sell"):
+        raise ValueError("side 只能是 buy 或 sell")
+    code = str(body.get("code", "")).strip()
+    if not (code.isdigit() and len(code) == 6):
+        raise ValueError("证券代码必须是 6 位数字")
+    try:
+        price = float(body.get("price"))
+        amount = int(body.get("amount"))
+    except (TypeError, ValueError):
+        raise ValueError("价格或数量不是数字")
+    if not (0 < price < 100000) or amount <= 0:
+        raise ValueError("价格和数量必须大于 0")
+    return side, code, price, amount
+
+
+def place_order(options, body):
+    """限价买入 / 卖出，返回客户端给出的结果（通常含 entrust_no）"""
+    side, code, price, amount = _parse_order(body)
+    if options.mock:
+        entrust_no = str(1000 + len(_mock_orders) + 1)
+        _mock_orders.append({
+            "委托时间": time.strftime("%H:%M:%S"), "证券代码": code, "证券名称": "示例股票",
+            "操作": "买入" if side == "buy" else "卖出", "备注": "已报",
+            "委托数量": amount, "成交数量": 0, "委托价格": price, "成交均价": 0.0, "合同编号": entrust_no,
+        })
+        return {"entrust_no": entrust_no}
+
+    def action(trader):
+        if side == "buy":
+            return trader.buy(code, price=price, amount=amount)
+        return trader.sell(code, price=price, amount=amount)
+
+    return _with_trader(options, action)
+
+
+def cancel_order(options, body):
+    entrust_no = str(body.get("entrust_no", "")).strip()
+    if not entrust_no:
+        raise ValueError("缺少 entrust_no")
+    if options.mock:
+        for order in _mock_orders:
+            if order["合同编号"] == entrust_no and order["备注"] == "已报":
+                order["备注"] = "已撤"
+                return {"message": "撤单申报成功"}
+        return {"message": "委托单状态错误不能撤单, 该委托单可能已经成交或者已撤"}
+    return _with_trader(options, lambda t: t.cancel_entrust(entrust_no))
 
 
 def _load_or_create_token(cli_token):
@@ -190,20 +263,50 @@ def _build_handler(options):
             given = self.headers.get("X-Bridge-Token", "")
             return hmac.compare_digest(given.encode("utf-8"), options.token.encode("utf-8"))
 
+        def _run(self, func, failure):
+            try:
+                return self._send(200, {"data": func()})
+            except ValueError as e:
+                return self._send(400, {"error": str(e)})
+            except Exception as e:
+                traceback.print_exc()
+                return self._send(502, {"error": f"{failure}: {type(e).__name__}: {e}"})
+
         def do_GET(self):
             path = self.path.split("?", 1)[0].rstrip("/")
             if path == "/health":
                 # 不需要口令，只用来确认服务在跑
-                return self._send(200, {"ok": True, "mock": options.mock})
+                return self._send(200, {"ok": True, "mock": options.mock, "trade": options.allow_trade})
             if not self._authorized():
                 return self._send(401, {"error": "口令错误"})
             if path == "/account":
-                try:
-                    return self._send(200, {"data": read_account(options)})
-                except Exception as e:
-                    traceback.print_exc()
-                    return self._send(502, {"error": f"读取同花顺客户端失败: {type(e).__name__}: {e}"})
+                return self._run(lambda: read_account(options), "读取同花顺客户端失败")
+            if path == "/orders":
+                return self._run(lambda: read_orders(options), "读取当日委托失败")
+            if path == "/trades":
+                return self._run(lambda: read_trades(options), "读取当日成交失败")
             return self._send(404, {"error": "not found"})
+
+        def do_POST(self):
+            path = self.path.split("?", 1)[0].rstrip("/")
+            if not self._authorized():
+                return self._send(401, {"error": "口令错误"})
+            if path not in ("/order", "/cancel"):
+                return self._send(404, {"error": "not found"})
+            if not options.allow_trade:
+                return self._send(403, {"error": "中转服务未开启交易，请加 --allow-trade 重新启动"})
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                if not isinstance(body, dict):
+                    raise ValueError
+            except ValueError:
+                return self._send(400, {"error": "请求体不是合法的 JSON 对象"})
+            print(f"[交易] {path} {json.dumps(body, ensure_ascii=False)}")
+            if path == "/order":
+                # 出错时委托可能已经报出去了，提醒到客户端核对
+                return self._run(lambda: place_order(options, body), "下单过程出错，结果未知，请到客户端核对当日委托")
+            return self._run(lambda: cancel_order(options, body), "撤单过程出错，结果未知，请到客户端核对")
 
         def log_message(self, fmt, *args):
             print(f"[{self.log_date_time_string()}] {self.client_address[0]} {fmt % args}")
@@ -212,11 +315,12 @@ def _build_handler(options):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="同花顺下单客户端中转服务（只读）")
+    parser = argparse.ArgumentParser(description="同花顺下单客户端中转服务")
     parser.add_argument("--exe", help=r"下单客户端路径，例如 C:\同花顺软件\同花顺\xiadan.exe")
     parser.add_argument("--host", default="0.0.0.0", help="监听地址，默认 0.0.0.0（局域网可访问）")
     parser.add_argument("--port", type=int, default=8765, help="监听端口，默认 8765")
     parser.add_argument("--token", help="访问口令；不指定则自动生成并保存到 bridge_token.txt")
+    parser.add_argument("--allow-trade", action="store_true", help="开启下单和撤单接口；不加则只能查询")
     parser.add_argument("--mock", action="store_true", help="不连接客户端，返回示例数据，用来先验证网络是否打通")
     options = parser.parse_args()
 
@@ -229,7 +333,8 @@ def main():
     print(f"同花顺中转服务已启动: http://{options.host}:{options.port}")
     print(f"访问口令: {options.token}")
     print("模式: " + ("示例数据（--mock）" if options.mock else f"连接客户端 {options.exe}"))
-    print("在钉钉里私聊机器人发送 #CONFIG 同花顺，按提示填入本机局域网地址和口令。")
+    print("交易: " + ("已开启（可下单、撤单）" if options.allow_trade else "未开启（只读，加 --allow-trade 开启）"))
+    print("在 Q-Limit 网页「设置 → 服务端配置 → 同花顺交易」填入本机局域网地址和口令。")
     print("=" * 60)
     try:
         server.serve_forever()

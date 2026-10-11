@@ -3,6 +3,7 @@ AI 多角色辩论聊天服务
 支持 Tool Calling，优先使用前端传入配置，缺省时回退到 .env
 """
 import json
+import time
 import uuid
 import requests
 from datetime import datetime
@@ -15,6 +16,7 @@ from config import (
     DINGTALK_NOTIFY_ON_DEBATE,
 )
 from models.database import get_collection
+from services import app_log
 
 # Tool Calling 函数映射
 from services.analysis import get_technical_summary, calc_support_resistance
@@ -35,7 +37,8 @@ TOOL_FUNCTIONS = {
 }
 
 
-def chat_with_role(role, message, stock_code, api_config, session_id=None, market="US", product="ST"):
+def chat_with_role(role, message, stock_code, api_config, session_id=None, market="US", product="ST",
+                   source="web", mode="chat"):
     """
     与指定角色对话（纯聊天模式，适配 Web2API 中转）
     api_config: {"api_key": "xxx", "base_url": "http://...", "model": "gemini-3.0-flash"}
@@ -57,9 +60,15 @@ def chat_with_role(role, message, stock_code, api_config, session_id=None, marke
     messages = _build_messages(role, message, stock_code, session_id, market, product)
 
     # 纯Web2API聊天模式，不传递 tools，防止解析错误
+    started = time.time()
     response_data = _call_llm(llm_config, messages, tools=None)
-    
+    log_detail = {
+        "role": role, "stock_code": stock_code, "model": model, "source": source,
+        "seconds": round(time.time() - started, 1),
+    }
+
     if not response_data:
+        app_log.log("ai", f"{role} 分析 {stock_code} 失败：接口调用失败", "error", log_detail)
         yield {"error": "AI 接口调用失败，请检查 API 地址和密钥"}
         return
 
@@ -69,8 +78,10 @@ def chat_with_role(role, message, stock_code, api_config, session_id=None, marke
     content = msg.get("content", "")
     if content:
         yield {"content": content, "role": role}
-        _save_chat(stock_code, session_id, role, message, content)
+        _save_chat(stock_code, session_id, role, message, content, market, product, source, mode)
+        app_log.log("ai", f"{role} 分析 {stock_code} 完成（{len(content)} 字）", "info", log_detail)
     else:
+        app_log.log("ai", f"{role} 分析 {stock_code} 失败：未返回内容", "error", log_detail)
         yield {"error": "AI 未返回有效内容"}
 
 
@@ -92,7 +103,8 @@ def debate(stock_code, api_config, session_id=None, user_prompt=None, market="US
         role_config = all_role_configs.get(role, {})
 
         full_content = ""
-        for chunk in chat_with_role(role, role_prompt, stock_code, role_config, session_id, market, product):
+        for chunk in chat_with_role(role, role_prompt, stock_code, role_config, session_id, market, product,
+                                    mode="debate"):
             if "content" in chunk:
                 full_content = chunk["content"]
             elif "tool_call" in chunk:
@@ -254,18 +266,89 @@ def _call_llm(llm_config, messages, tools=None):
         return None
 
 
-def _save_chat(stock_code, session_id, role, user_message, ai_response):
+def _save_chat(stock_code, session_id, role, user_message, ai_response,
+               market="", product="", source="web", mode="chat"):
     col = get_collection("chat_history")
     if col is None:
         return
     col.insert_one({
         "stock_code": stock_code,
+        "market": market,
+        "product": product,
         "session_id": session_id or "default",
         "role": role,
+        "source": source,
+        "mode": mode,
         "user_message": user_message,
         "ai_response": ai_response,
         "created_at": datetime.now(),
     })
+
+
+def list_chat_sessions(keyword="", limit=100):
+    """
+    把 chat_history 按 股票 + session_id 聚合成会话列表（最近的在前），供历史记录面板使用
+    """
+    names = {}
+    for doc in get_collection("stocks").find({}, {"_id": 0}):
+        names[(doc.get("code"), doc.get("market"))] = doc.get("name_cn") or doc.get("name") or ""
+        names.setdefault((doc.get("code"), ""), doc.get("name_cn") or doc.get("name") or "")
+
+    sessions = {}
+    for doc in get_collection("chat_history").find({}, {"_id": 0}).sort("created_at", 1):
+        key = (doc.get("stock_code", ""), doc.get("session_id", ""))
+        created_at = str(doc.get("created_at", ""))
+        item = sessions.get(key)
+        if item is None:
+            market = doc.get("market", "")
+            item = sessions[key] = {
+                "stock_code": key[0],
+                "session_id": key[1],
+                "stock_name": names.get((key[0], market)) or names.get((key[0], "")) or "",
+                "market": market,
+                "product": doc.get("product", ""),
+                "source": doc.get("source") or ("bot" if key[1].startswith("bot-") else "web"),
+                "mode": doc.get("mode") or "chat",
+                "title": _session_title(doc),
+                "started_at": created_at,
+                "roles": [],
+                "count": 0,
+            }
+        if doc.get("mode") == "debate":
+            item["mode"] = "debate"
+        if doc.get("role") and doc["role"] not in item["roles"]:
+            item["roles"].append(doc["role"])
+        item["count"] += 1
+        item["updated_at"] = created_at
+
+    result = sorted(sessions.values(), key=lambda x: x.get("updated_at", ""), reverse=True)
+    keyword = (keyword or "").strip().lower()
+    if keyword:
+        result = [
+            item for item in result
+            if keyword in f"{item['stock_code']} {item['stock_name']} {item['title']}".lower()
+        ]
+    return result[:max(1, min(int(limit or 100), 500))]
+
+
+def _session_title(doc):
+    if str(doc.get("session_id", "")).startswith("bot-analyze"):
+        return "机器人 #ANALYZE 分析"
+    text = " ".join(str(doc.get("user_message", "")).split())
+    return text[:60] or "（无提问内容）"
+
+
+def get_session_messages(stock_code, session_id):
+    """某个会话的全部消息，按时间正序"""
+    return list(
+        get_collection("chat_history")
+        .find({"stock_code": stock_code, "session_id": session_id}, {"_id": 0})
+        .sort("created_at", 1)
+    )
+
+
+def delete_chat_session(stock_code, session_id):
+    return get_collection("chat_history").delete_many({"stock_code": stock_code, "session_id": session_id})
 
 
 def _get_kline_summary(stock_code, days=30, market="US", product="ST"):

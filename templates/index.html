@@ -82,6 +82,18 @@
                 <span class="theme-icon-dark">🌙</span>
                 <span class="theme-icon-light" style="display:none">☀️</span>
             </button>
+            <button class="btn-icon" id="btnRecords" title="分析历史与运行日志">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 7v5l3 2" />
+                </svg>
+            </button>
+            <button class="btn-icon" id="btnTrade" title="交易（同花顺）">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 17l6-6 4 4 8-8" />
+                    <path d="M15 7h6v6" />
+                </svg>
+            </button>
             <button class="btn-icon" id="btnSettings" title="AI模型设置">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path
@@ -577,12 +589,115 @@
         </div>
     </div>
 
+    <!-- ===== 交易弹窗（同花顺中转） ===== -->
+    <div class="modal-overlay" id="tradeModal" style="display:none;">
+        <div class="modal-content trade-modal">
+            <div class="modal-header">
+                <h2>💹 交易 <span class="trade-badge" id="tradeBadge"></span></h2>
+                <div class="trade-header-actions">
+                    <button class="btn-sm" id="btnTradeRefresh" title="刷新">🔄 刷新</button>
+                    <button class="modal-close" id="btnCloseTrade">&times;</button>
+                </div>
+            </div>
+            <div class="modal-body trade-body">
+                <div class="trade-notice" id="tradeNotice" style="display:none"></div>
+                <div class="trade-assets" id="tradeAssets"></div>
+                <div class="trade-layout">
+                    <form class="trade-form" id="tradeForm" autocomplete="off">
+                        <div class="trade-side-switch">
+                            <button type="button" class="trade-side active" data-side="buy">买入</button>
+                            <button type="button" class="trade-side" data-side="sell">卖出</button>
+                        </div>
+                        <div class="form-group">
+                            <label for="tradeCode">证券代码 <span class="trade-stock-name" id="tradeStockName"></span></label>
+                            <input type="text" id="tradeCode" inputmode="numeric" maxlength="6" placeholder="6 位 A 股代码">
+                        </div>
+                        <div class="form-group">
+                            <label for="tradePrice">委托价格（限价）</label>
+                            <input type="text" id="tradePrice" inputmode="decimal" placeholder="0.00">
+                        </div>
+                        <div class="form-group">
+                            <label for="tradeAmount">数量（股） <span class="trade-hint" id="tradeAmountHint"></span></label>
+                            <input type="text" id="tradeAmount" inputmode="numeric" placeholder="买入为 100 的整数倍">
+                        </div>
+                        <div class="form-group">
+                            <label for="tradePin">交易口令</label>
+                            <input type="password" id="tradePin" autocomplete="off" placeholder="服务端配置的 TRADE_PIN">
+                        </div>
+                        <div class="trade-estimate" id="tradeEstimate"></div>
+                        <button type="submit" class="btn trade-submit buy" id="btnTradeSubmit">买入</button>
+                        <div class="trade-confirm" id="tradeConfirm" style="display:none">
+                            <div class="trade-confirm-text" id="tradeConfirmText"></div>
+                            <div class="trade-confirm-actions">
+                                <button type="button" class="btn btn-secondary" id="btnTradeConfirmCancel">取消</button>
+                                <button type="button" class="btn trade-submit buy" id="btnTradeConfirmOk">确认下单</button>
+                            </div>
+                        </div>
+                        <div class="trade-result" id="tradeResult"></div>
+                    </form>
+                    <div class="trade-tables">
+                        <div class="trade-tabs">
+                            <button class="trade-tab active" data-tab="positions">持仓</button>
+                            <button class="trade-tab" data-tab="orders">当日委托</button>
+                            <button class="trade-tab" data-tab="trades">当日成交</button>
+                        </div>
+                        <div class="trade-table-wrap" id="tradeTableWrap"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 记录弹窗：分析历史 / 运行日志 ===== -->
+    <div class="modal-overlay" id="recordsModal" style="display:none;">
+        <div class="modal-content records-modal">
+            <div class="modal-header">
+                <h2>🕘 记录</h2>
+                <button class="modal-close" id="btnCloseRecords">&times;</button>
+            </div>
+            <div class="settings-tabs">
+                <button class="settings-tab records-tab active" data-view="history">💬 分析历史</button>
+                <button class="settings-tab records-tab" data-view="logs">📜 运行日志</button>
+            </div>
+            <div class="records-view" id="recordsHistory">
+                <div class="records-sidebar">
+                    <input type="text" class="records-search" id="historySearch" placeholder="搜索股票代码、名称或提问">
+                    <div class="records-list" id="historyList"></div>
+                </div>
+                <div class="records-detail" id="historyDetail"></div>
+            </div>
+            <div class="records-view records-logs" id="recordsLogs" style="display:none">
+                <div class="records-toolbar">
+                    <select id="logCategory">
+                        <option value="">全部分类</option>
+                        <option value="trade">交易</option>
+                        <option value="bot">机器人</option>
+                        <option value="ai">AI 调用</option>
+                        <option value="settings">配置变更</option>
+                        <option value="system">系统</option>
+                    </select>
+                    <select id="logLevel">
+                        <option value="">全部级别</option>
+                        <option value="info">信息</option>
+                        <option value="warning">警告</option>
+                        <option value="error">错误</option>
+                    </select>
+                    <input type="text" class="records-search" id="logSearch" placeholder="搜索日志内容">
+                    <button class="btn-sm" id="btnLogRefresh">🔄 刷新</button>
+                </div>
+                <div class="records-log-list" id="logList"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- JS -->
     <script src="/static/js/app.js"></script>
     <script src="/static/js/chart.js"></script>
     <script src="/static/js/analysis.js"></script>
     <script src="/static/js/chat.js"></script>
     <script src="/static/js/settings.js"></script>
+    <script src="/static/js/trade.js"></script>
+    <script src="/static/js/records.js"></script>
 </body>
 
 </html>

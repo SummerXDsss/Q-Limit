@@ -252,6 +252,18 @@ class SQLiteCollection:
             )
         return {"inserted_id": cur.lastrowid}
 
+    def delete_many(self, query: Optional[Dict[str, Any]] = None) -> int:
+        """删除所有匹配的文档，返回删除条数"""
+        ids = [row_id for row_id, doc in self._fetch_rows() if _match_query(doc, query)]
+        with _get_conn() as conn:
+            for start in range(0, len(ids), 500):
+                chunk = ids[start:start + 500]
+                conn.execute(
+                    f"DELETE FROM documents WHERE id IN ({','.join('?' * len(chunk))})",
+                    chunk,
+                )
+        return len(ids)
+
     # 兼容旧接口（SQLite 下无意义，保留为 no-op）
     def create_index(self, *args, **kwargs):
         return None

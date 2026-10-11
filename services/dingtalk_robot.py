@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import threading
+import time
 
 import requests
 
@@ -17,6 +18,7 @@ from config import (
     DINGTALK_CLIENT_SECRET,
 )
 from models.database import get_collection
+from services import app_log
 from services.bot_skills import handle_incoming_message
 
 PROCESSED_MESSAGE_COLLECTION = "bot_processed_messages"
@@ -25,6 +27,7 @@ _client_thread = None
 _started = False
 # Stream 长连接的真实状态：线程活着不代表已连上（凭证错误时 SDK 只会不断重试）
 _connection = {"connected": False, "last_error": ""}
+_last_error_logged_at = 0.0
 _CONNECTION_ERROR_PREFIXES = ("open connection failed, error=", "[start] network exception", "unknown exception")
 
 
@@ -38,6 +41,11 @@ class _ConnectionErrorHandler(logging.Handler):
             # SDK 的 logger.exception('unknown exception', e) 占位符不匹配
             message = f"{record.msg} {record.args}"
         if message.startswith(_CONNECTION_ERROR_PREFIXES):
+            # 凭证错误时 SDK 每隔几秒重试一次（每次 requestid 都不同），限制成最多 10 分钟记一条
+            global _last_error_logged_at
+            if time.time() - _last_error_logged_at > 600:
+                _last_error_logged_at = time.time()
+                app_log.log("system", f"钉钉 Stream 连接异常：{message[:200]}", "error")
             _connection["connected"] = False
             _connection["last_error"] = message[:300]
 
@@ -153,6 +161,7 @@ def _build_handler(dingtalk_stream):
                 _mark_message_processed(message_id, raw)
 
                 context = {
+                    "source": "dingtalk",
                     "sender_staff_id": incoming.sender_staff_id,
                     "sender_id": incoming.sender_id,
                     "sender_nick": incoming.sender_nick,
@@ -204,6 +213,8 @@ def start_dingtalk_stream_bot():
             def open_connection(self):
                 connection = super().open_connection()
                 if connection:
+                    if not _connection["connected"]:
+                        app_log.log("system", "钉钉 Stream 已连接")
                     _connection["connected"] = True
                     _connection["last_error"] = ""
                 else:

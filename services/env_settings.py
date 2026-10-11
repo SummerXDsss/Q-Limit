@@ -111,10 +111,22 @@ SETTING_GROUPS = [
         ],
     },
     {
+        "id": "ths_trade",
+        "title": "💹 同花顺交易",
+        "desc": "A 股券商通过 Windows 上的中转服务 tools/ths_bridge 接入。查询随时可用；网页下单需要同时开启下面的开关、设置交易口令，并且中转服务以 --allow-trade 启动。",
+        "fields": [
+            _f("THS_BRIDGE_URL", "中转服务地址", hint="例如 http://192.168.1.50:8765"),
+            _f("THS_BRIDGE_TOKEN", "中转服务口令", _SECRET, hint="中转服务启动时打印的访问口令"),
+            _f("TRADE_ENABLED", "允许网页下单 / 撤单", _BOOL, default="false"),
+            _f("TRADE_PIN", "交易口令", _SECRET, hint="每次下单、撤单都要输入；未设置时不允许交易"),
+        ],
+    },
+    {
         "id": "base",
         "title": "🧱 基础",
         "desc": "",
         "fields": [
+            _f("LOG_RETENTION_DAYS", "运行日志保留天数", _INT, default="14"),
             _f("SQLITE_DB_PATH", "SQLite 数据库路径", hint="留空使用 data/stock_analysis.db", restart=True),
             _f("SECRET_KEY", "Flask SECRET_KEY", _SECRET, restart=True),
         ],
@@ -202,6 +214,9 @@ def update_settings(values=None, clear=None):
                 ok, msg = dingtalk_robot.start_dingtalk_stream_bot()
                 notes.append("钉钉 Stream 机器人已启动" if ok else f"钉钉 Stream 机器人未启动: {msg}")
 
+    from services import app_log
+
+    app_log.log("settings", f"服务端配置已更新：{'、'.join(sorted(changes))}", "info", {"keys": sorted(changes)})
     return {
         "ok": True,
         "updated": sorted(changes),

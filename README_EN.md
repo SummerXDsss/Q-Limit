@@ -102,6 +102,9 @@ When the DingTalk bot receives `#command`, it will execute rules from [`Bot_Skil
 - `#ACCOUNT` shows assets and positions of the logged-in broker; `#BUY` / `#SELL` still never place real orders
 - `#CONFIG 查看` checks current config, `#CONFIG 删除` removes it, and `#q` or `#CANCEL` aborts the active flow
 - `#CONFIG 同花顺`: mainland A-share brokers are reached through a small read-only bridge running next to the broker's THS trading client on a Windows machine in your LAN; see [`tools/ths_bridge/README.md`](tools/ths_bridge/README.md)
+- The trade button in the top-right corner shows the THS account's assets, positions, today's orders and fills, and can place limit orders and cancel them: fill in the bridge address and token under Settings → Server config → 同花顺交易; placing orders also requires enabling web trading, setting a trade PIN, and starting the bridge with `--allow-trade`
+- The THS configuration is shared by the web UI and the bot. The bot supports `#ORDERS`, `#TRADES`, `#BUY code amount price PIN`, `#SELL ...` and `#REVOKE order-no PIN` (private chat only, same switches as the web UI)
+- The clock button in the top-right corner opens Records: analysis history (web chats, debates and bot `#ANALYZE`, with search, delete and resume) and runtime logs (trades, bot, AI calls, settings changes, system; kept for 14 days by default)
 - Futu and IBKR need a local gateway and are not supported; credentials are stored in plain text in the SQLite database, so only run this on a machine you control
 - The Longbridge SDK's prebuilt Linux wheels need glibc ≥ 2.39 (the Docker image satisfies this); other features keep working if it cannot be installed
 - The login flow auto-exits after 60 seconds of inactivity

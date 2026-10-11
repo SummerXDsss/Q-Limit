@@ -7,7 +7,8 @@ from datetime import datetime, timedelta
 
 from config import BASE_DIR
 from models.database import get_collection
-from services import ai_chat, analysis, brokers, financial, news, stock_data, valuation, web_search
+from services import ai_chat, analysis, app_log, brokers, env_settings, financial, news, stock_data, trade
+from services import valuation, web_search
 
 SESSION_COLLECTION = "bot_sessions"
 BROKER_COLLECTION = "broker_accounts"
@@ -54,7 +55,7 @@ def _group_help_lines(lines):
         upper = line.upper()
         if upper.startswith(("#PRICE", "#KDJ", "#NEWS", "#MA10", "#ANALYZE", "#T1", "#T7", "#T30", "#T365")):
             groups["行情分析"].append(line)
-        elif upper.startswith(("#BUY", "#SELL", "#CONFIG", "#ACCOUNT", "#CANCEL", "#Q")):
+        elif upper.startswith(("#BUY", "#SELL", "#CONFIG", "#ACCOUNT", "#ORDERS", "#TRADES", "#REVOKE", "#CANCEL", "#Q")):
             groups["交易配置"].append(line)
         elif upper.startswith(("#ANALYZE_MCP", "#GRAPH", "#SEARCH")):
             groups["扩展能力"].append(line)
@@ -106,7 +107,8 @@ def _help_text():
         "- #ANALYZE 601998",
         "- #GRAPH on",
         "- #CONFIG 长桥（私聊机器人，按提示逐项回复开发者凭证）",
-        "- #ACCOUNT",
+        "- #ACCOUNT / #ORDERS / #TRADES",
+        "- #BUY 600030 100 25.10 交易口令",
         "- #CONFIG 查看",
         "",
         "流程提示：",
@@ -756,6 +758,7 @@ def _generate_ai_analysis_markdown(snapshot, ctx=None, use_mcp=False):
     for chunk in ai_chat.chat_with_role(
         "judge", prompt, stock["code"], {}, session_id=session_id,
         market=stock.get("market") or "US", product=stock.get("product") or "ST",
+        source="bot",
     ):
         if "content" in chunk:
             content = chunk["content"]
@@ -853,37 +856,111 @@ def _cmd_graph(args, ctx):
     return _text_response(message)
 
 
+def _uses_server_ths(ctx):
+    """
+    这个用户的账户是否走服务端那份同花顺配置（和网页交易面板共用）。
+    自己用 #CONFIG 登录了长桥 / 老虎的用户仍然用自己的。
+    """
+    profile = _get_broker_profile(ctx)
+    personal = bool(profile and profile.get("broker_id") in ("longbridge", "tiger") and profile.get("credentials"))
+    return not personal and trade.get_status(check_bridge=False)["configured"]
+
+
+def _private_only(ctx, what):
+    if _is_group_chat(ctx):
+        return _text_response(f"{what}只能在私聊中使用，请单独给机器人发消息。")
+    return None
+
+
 def _cmd_buy_sell(cmd, args, ctx):
-    if len(args) < 3:
-        return f"用法: #{cmd} 股票代码 数量 价格"
+    if len(args) < 4:
+        return _text_response(f"用法: #{cmd} 股票代码 数量 价格 交易口令\n例如: #{cmd} 600030 100 25.10 ****")
+    blocked = _private_only(ctx, "下单")
+    if blocked:
+        return blocked
+    if not _uses_server_ths(ctx):
+        return _text_response("下单只支持同花顺账户。请先发送 #CONFIG 同花顺，或在网页「设置 → 服务端配置 → 同花顺交易」里配置。")
 
-    profile, error = _usable_broker_profile(ctx)
-    if error:
-        return _text_response(error)
-
-    symbol, qty, price = args[0], args[1], args[2]
-    action = "买入" if cmd == "BUY" else "卖出"
-    return _text_response(
-        f"已收到交易指令：{action} {symbol} {qty} 股 @ {price}\n"
-        f"当前券商: {profile.get('broker_name', '--')} / 账户: {profile.get('account_masked', '--')}\n"
-        "当前版本只接入了登录与资产查询，不会真实下单。"
+    stock, err = _resolve_stock(args[0])
+    if err:
+        return _text_response(err)
+    side = "buy" if cmd == "BUY" else "sell"
+    result, error = trade.place_order(
+        side, stock["code"], args[2], args[1], args[3], source=f"bot:{ctx['user_id']}",
     )
+    action = "买入" if side == "buy" else "卖出"
+    if error:
+        return _text_response(f"{action} {stock['name']} {stock['code']} 未提交：{error}")
+    return _text_response(
+        f"已报单：{action} {stock['name']} {stock['code']} {args[1]} 股 @ {args[2]}\n"
+        f"委托编号: {result.get('entrust_no') or result.get('message') or '--'}\n"
+        "发送 #ORDERS 查看当日委托。建议撤回带有交易口令的那条消息。"
+    )
+
+
+def _cmd_revoke(args, ctx):
+    if len(args) < 2:
+        return _text_response("用法: #REVOKE 委托编号 交易口令（委托编号见 #ORDERS）")
+    blocked = _private_only(ctx, "撤单")
+    if blocked:
+        return blocked
+    if not _uses_server_ths(ctx):
+        return _text_response("撤单只支持同花顺账户。")
+    result, error = trade.cancel_order(args[0], args[1], source=f"bot:{ctx['user_id']}")
+    if error:
+        return _text_response(f"撤单 {args[0]} 未提交：{error}")
+    return _text_response(f"撤单 {args[0]}：{result.get('message') or '已提交'}")
+
+
+def _cmd_orders(ctx, kind):
+    """kind: orders 当日委托 / trades 当日成交"""
+    title = "当日委托" if kind == "orders" else "当日成交"
+    blocked = _private_only(ctx, title)
+    if blocked:
+        return blocked
+    if not _uses_server_ths(ctx):
+        return _text_response(f"{title}只支持同花顺账户。")
+    rows, error = trade.get_orders() if kind == "orders" else trade.get_trades()
+    if error:
+        return _text_response(f"读取{title}失败：{error}")
+    if not rows:
+        return _text_response(f"今日没有{'委托' if kind == 'orders' else '成交'}。")
+
+    lines = [f"# {title}（{len(rows)}）", ""]
+    for row in rows[:30]:
+        if kind == "orders":
+            lines.append(
+                f"- {row['time']} {row['side']} {row['name']} {row['symbol']} "
+                f"{_fmt_num(row['quantity'], 0)} 股 @ {_fmt_num(row['price'], 3)}，"
+                f"成交 {_fmt_num(row['filled_quantity'], 0)}，{row['status'] or '--'}，编号 {row['entrust_no'] or '--'}"
+            )
+        else:
+            lines.append(
+                f"- {row['time']} {row['side']} {row['name']} {row['symbol']} "
+                f"{_fmt_num(row['filled_quantity'], 0)} 股 @ {_fmt_num(row['filled_price'], 3)}"
+            )
+    if kind == "orders":
+        lines += ["", "撤单: #REVOKE 委托编号 交易口令"]
+    return _markdown_response(title, "\n".join(lines))
 
 
 def _cmd_account(ctx):
-    profile, error = _usable_broker_profile(ctx)
-    if error:
-        return _text_response(error)
-    if _is_group_chat(ctx):
-        return _text_response("资产信息只在私聊中返回，请单独给机器人发 #ACCOUNT。")
+    blocked = _private_only(ctx, "资产信息")
+    if blocked:
+        return blocked
 
-    account, error = brokers.get_account(profile["broker_id"], profile["credentials"])
+    if _uses_server_ths(ctx):
+        name = brokers.BROKERS["ths"]["name"]
+        account, error = trade.get_account()
+    else:
+        profile, error = _usable_broker_profile(ctx)
+        if error:
+            return _text_response(error)
+        name = profile.get("broker_name", "")
+        account, error = brokers.get_account(profile["broker_id"], profile["credentials"])
     if error:
-        return _text_response(f"{profile.get('broker_name', '')} 登录失败：{error}")
-    return _markdown_response(
-        f"{profile.get('broker_name', '')} 账户",
-        f"# {profile.get('broker_name', '')} 账户\n\n{brokers.format_account(account)}",
-    )
+        return _text_response(f"{name} 读取失败：{error}")
+    return _markdown_response(f"{name} 账户", f"# {name} 账户\n\n{brokers.format_account(account)}")
 
 
 def _is_group_chat(ctx):
@@ -905,8 +982,15 @@ def _cmd_config_view(ctx):
         else:
             lines.append("发送 #ACCOUNT 查看资产与持仓，#CONFIG 删除 可清除配置。")
     else:
-        lines.append("当前没有已保存的券商配置。")
+        lines.append("当前没有个人券商配置。")
         lines.append(f"支持的券商：{'、'.join(brokers.supported_names())}")
+
+    status = trade.get_status(check_bridge=False)
+    if status["configured"]:
+        lines.append("")
+        lines.append("服务端已配置同花顺中转（网页和机器人共用）：")
+        lines.append(f"- 下单 / 撤单: {'已开启' if status['trade_enabled'] and status['pin_set'] else '未开启'}")
+        lines.append("可用 #ACCOUNT / #ORDERS / #TRADES / #BUY / #SELL / #REVOKE。")
 
     if session:
         lines.append("")
@@ -971,7 +1055,10 @@ def _cmd_config(arg, ctx):
     if raw in ("删除", "清除", "退出登录", "logout", "LOGOUT"):
         _clear_session(ctx)
         _remove_broker_profile(ctx)
-        return _text_response("已清除保存的券商配置。")
+        note = ""
+        if trade.get_status(check_bridge=False)["configured"]:
+            note = "\n服务端的同花顺配置不受影响，要修改请到网页「设置 → 服务端配置 → 同花顺交易」。"
+        return _text_response("已清除个人券商配置。" + note)
     return _start_config_flow(ctx, raw)
 
 
@@ -1092,6 +1179,22 @@ def _resume_session(session, text, ctx):
             return _text_response(
                 f"{broker['name']} 登录失败，配置未保存：{error}\n请检查后重新发送 #CONFIG {broker['aliases'][0]}。"
             )
+        if broker_id == "ths":
+            # 同花顺账户是服务端级别的：写进 .env，网页交易面板和机器人共用
+            saved = env_settings.update_settings({
+                "THS_BRIDGE_URL": values.get("bridge_url", ""),
+                "THS_BRIDGE_TOKEN": values.get("token", ""),
+            })
+            if not saved.get("ok"):
+                return _text_response(f"登录成功，但保存到服务端配置失败：{saved.get('error')}")
+            _remove_broker_profile(ctx)
+            return _markdown_response(
+                "同花顺接入成功",
+                f"{broker['name']} 接入成功，已保存到服务端配置，网页交易面板同步可用。\n"
+                f"{summary}\n\n"
+                "可用命令：#ACCOUNT 资产持仓、#ORDERS 当日委托、#TRADES 当日成交。\n"
+                "下单（#BUY / #SELL / #REVOKE）还需要在网页「设置 → 服务端配置 → 同花顺交易」开启并设置交易口令。"
+            )
         profile = _save_broker_profile(ctx, broker_id, values)
         return _markdown_response(
             "券商登录成功",
@@ -1143,6 +1246,10 @@ def handle_skill_command(text, context=None):
         return _cmd_config(tail.strip(), ctx)
     if cmd_upper == "ACCOUNT":
         return _cmd_account(ctx)
+    if cmd_upper in ("ORDERS", "TRADES"):
+        return _cmd_orders(ctx, cmd_upper.lower())
+    if cmd_upper == "REVOKE":
+        return _cmd_revoke(args, ctx)
     if cmd_upper == "ANALYZE":
         return _cmd_analyze_with_context(tail.strip(), ctx, use_mcp=False)
     if cmd_upper == "ANALYZE_MCP":
@@ -1166,7 +1273,46 @@ def handle_skill_command(text, context=None):
     return _text_response(f"未识别命令: #{raw_cmd}\n\n{_help_text()}")
 
 
+_SECRET_COMMANDS = ("#BUY", "#SELL", "#REVOKE")
+
+
+def _loggable_text(text, in_flow):
+    """写日志用的消息文本：多轮流程里的输入是凭证，交易命令末尾是口令，都不落盘"""
+    text = (text or "").strip()
+    if in_flow and not text.startswith("#"):
+        return "（配置流程输入，已隐藏）"
+    if text.upper().startswith(_SECRET_COMMANDS):
+        parts = text.split()
+        # 参数不全时最后一项也可能是口令（比如漏写了价格），一并抹掉
+        if len(parts) >= (3 if parts[0].upper() == "#REVOKE" else 4):
+            parts[-1] = "****"
+        return " ".join(parts)
+    return text[:200]
+
+
 def handle_incoming_message(text, context=None):
+    """处理一条机器人消息并记一条运行日志，返回值同 _handle_incoming_message"""
+    ctx = _normalize_context(context)
+    in_flow = bool(_get_session(ctx))
+    started = datetime.now()
+    result = _handle_incoming_message(text, context)
+    if result.get("handled"):
+        app_log.log(
+            "bot",
+            f"{ctx.get('sender_nick') or ctx['user_id']}: {_loggable_text(text, in_flow)}",
+            "info",
+            {
+                "source": ctx.get("source") or "",
+                "user_id": ctx["user_id"],
+                "seconds": round((datetime.now() - started).total_seconds(), 1),
+                # 配置流程的回复里可能带账号片段，只记普通命令的回复摘要
+                "reply": "" if in_flow else str(result.get("reply") or "")[:200],
+            },
+        )
+    return result
+
+
+def _handle_incoming_message(text, context=None):
     """
     统一处理机器人消息：
     - 会话中允许继续发送非 # 文本
